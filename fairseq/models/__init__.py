@@ -21,7 +21,7 @@ from .fairseq_model import (
 
 from .composite_encoder import CompositeEncoder  # noqa: F401
 from .distributed_fairseq_model import DistributedFairseqModel  # noqa: F401
-
+from .ema import EMA, ema_init, ema_step, ema_restore, ema_reverse
 
 MODEL_REGISTRY = {}
 ARCH_MODEL_REGISTRY = {}

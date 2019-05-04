@@ -156,12 +156,16 @@ class IndexedRawTextDataset(torch.utils.data.Dataset):
     """Takes a text file as input and binarizes it in memory at instantiation.
     Original lines are also kept in memory"""
 
-    def __init__(self, path, dictionary, append_eos=True, reverse_order=False):
+    def __init__(self, path, dictionary, append_eos=True, reverse_order=False, copy_ext_dict=False, src_dataset=None):
         self.tokens_list = []
+        self.words_list = []
         self.lines = []
         self.sizes = []
         self.append_eos = append_eos
         self.reverse_order = reverse_order
+        self.copy_ext_dict = copy_ext_dict
+        self.src_dataset = src_dataset 
+
         self.read_data(path, dictionary)
         self.size = len(self.tokens_list)
 
@@ -169,11 +173,16 @@ class IndexedRawTextDataset(torch.utils.data.Dataset):
         with open(path, 'r', encoding='utf-8') as f:
             for line in f:
                 self.lines.append(line.strip('\n'))
+                out_words = []
+                copy_src_words = None if self.src_dataset is None else self.src_dataset.words_list[len(self.lines)-1]
                 tokens = dictionary.encode_line(
                     line, add_if_not_exist=False,
                     append_eos=self.append_eos, reverse_order=self.reverse_order,
+                    copy_ext_dict=self.copy_ext_dict, copy_src_words=copy_src_words,
+                    out_words=out_words
                 ).long()
                 self.tokens_list.append(tokens)
+                self.words_list.append(out_words)
                 self.sizes.append(len(tokens))
         self.sizes = np.array(self.sizes)
 
@@ -258,3 +267,34 @@ class IndexedDatasetBuilder(object):
         write_longs(index, self.data_offsets)
         write_longs(index, self.sizes)
         index.close()
+
+
+class IndexedRawLabelDataset(torch.utils.data.Dataset):
+    def __init__(self, path, append_eos=True):
+        self.append_eos=append_eos
+        self.labels_list = self.read_data(path)
+        self.size = len(self.labels_list)
+
+    def read_data(self, path):
+        lines = open(path, 'r').readlines()
+        labels_list = [[int(l) for l in line.split()] for line in lines]
+        if self.append_eos:
+            [l.append(0) for l in labels_list]
+        tensor_list = [torch.IntTensor(l) for l in labels_list]
+
+        return tensor_list
+
+    def check_index(self, i):
+        if i < 0 or i >= self.size:
+            raise IndexError('index out of range')
+
+    def __getitem__(self, i):
+        self.check_index(i)
+        return self.labels_list[i]
+
+    def __len__(self):
+        return self.size
+
+    @staticmethod
+    def exists(path):
+        return os.path.exists(path)

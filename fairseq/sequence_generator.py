@@ -33,6 +33,7 @@ class SequenceGenerator(object):
         diverse_beam_strength=0.5,
         match_source_len=False,
         no_repeat_ngram_size=0,
+        copy_ext_dict=False,
     ):
         """Generates translations of a given source sentence.
 
@@ -69,10 +70,10 @@ class SequenceGenerator(object):
         self.pad = tgt_dict.pad()
         self.unk = tgt_dict.unk()
         self.eos = tgt_dict.eos()
-        self.vocab_size = len(tgt_dict)
+        self.fixed_vocab_size = len(tgt_dict)
         self.beam_size = beam_size
         # the max beam size is the dictionary size - 1, since we never select pad
-        self.beam_size = min(beam_size, self.vocab_size - 1)
+        self.beam_size = min(beam_size, self.fixed_vocab_size - 1)
         self.max_len_a = max_len_a
         self.max_len_b = max_len_b
         self.min_len = min_len
@@ -83,6 +84,7 @@ class SequenceGenerator(object):
         self.retain_dropout = retain_dropout
         self.match_source_len = match_source_len
         self.no_repeat_ngram_size = no_repeat_ngram_size
+        self.copy_ext_dict = copy_ext_dict
 
         assert sampling_topk < 0 or sampling, '--sampling-topk requires --sampling'
 
@@ -130,6 +132,11 @@ class SequenceGenerator(object):
         bsz, src_len = src_tokens.size()
         beam_size = self.beam_size
 
+        # update vocab size with src token length
+        self.vocab_size = self.fixed_vocab_size
+        if self.copy_ext_dict:
+            self.vocab_size += src_len
+
         if self.match_source_len:
             max_len = src_lengths.max().item()
         else:
@@ -175,7 +182,7 @@ class SequenceGenerator(object):
                 buffers[name] = type_of.new()
             return buffers[name]
 
-        def is_finished(sent, step, unfinalized_scores=None):
+        def is_finished(sent, unfin_idx, step, unfinalized_scores=None):
             """
             Check whether we've finished generation for a given sentence, by
             comparing the worst score among finalized hypotheses to the best
@@ -187,7 +194,7 @@ class SequenceGenerator(object):
                     return True
                 # stop if the best unfinalized score is worse than the worst
                 # finalized one
-                best_unfinalized_score = unfinalized_scores[sent].max()
+                best_unfinalized_score = unfinalized_scores[unfin_idx].max()
                 if self.normalize_scores:
                     best_unfinalized_score /= max_len ** self.len_penalty
                 if worst_finalized[sent]['score'] >= best_unfinalized_score:
@@ -284,7 +291,7 @@ class SequenceGenerator(object):
             newly_finished = []
             for sent, unfin_idx in sents_seen:
                 # check termination conditions for this sentence
-                if not finished[sent] and is_finished(sent, step, unfinalized_scores):
+                if not finished[sent] and is_finished(sent, unfin_idx, step, unfinalized_scores):
                     finished[sent] = True
                     newly_finished.append(unfin_idx)
             return newly_finished
@@ -411,6 +418,7 @@ class SequenceGenerator(object):
                         mask=eos_mask[:, :beam_size],
                         out=eos_scores,
                     )
+                    
                     finalized_sents = finalize_hypos(step, eos_bbsz_idx, eos_scores, cand_scores)
                     num_remaining_sent -= len(finalized_sents)
 
@@ -569,7 +577,7 @@ class EnsembleModel(torch.nn.Module):
             avg_attn.div_(len(self.models))
         return avg_probs, avg_attn
 
-    def _decode_one(self, tokens, model, encoder_out, incremental_states, log_probs):
+    def _decode_one(self, tokens, model, encoder_out, incremental_states, log_probs, sample=None):
         if self.incremental_states is not None:
             decoder_out = list(model.decoder(tokens, encoder_out, incremental_state=self.incremental_states[model]))
         else:

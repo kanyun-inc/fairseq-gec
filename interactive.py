@@ -19,7 +19,7 @@ from fairseq import data, options, tasks, tokenizer, utils
 from fairseq.sequence_generator import SequenceGenerator
 from fairseq.utils import import_user_module
 
-Batch = namedtuple('Batch', 'ids src_tokens src_lengths')
+Batch = namedtuple('Batch', 'ids src_tokens src_lengths, src_strs')
 Translation = namedtuple('Translation', 'src_str hypos pos_scores alignments')
 
 
@@ -38,7 +38,7 @@ def buffered_read(input, buffer_size):
 
 def make_batches(lines, args, task, max_positions):
     tokens = [
-        task.source_dictionary.encode_line(src_str, add_if_not_exist=False).long()
+        task.source_dictionary.encode_line(src_str, add_if_not_exist=False, copy_ext_dict=args.copy_ext_dict).long()
         for src_str in lines
     ]
     lengths = torch.LongTensor([t.numel() for t in tokens])
@@ -52,6 +52,7 @@ def make_batches(lines, args, task, max_positions):
         yield Batch(
             ids=batch['id'],
             src_tokens=batch['net_input']['src_tokens'], src_lengths=batch['net_input']['src_lengths'],
+            src_strs=[lines[i] for i in batch['id']],
         )
 
 
@@ -80,6 +81,7 @@ def main(args):
     models, _model_args = utils.load_ensemble_for_inference(
         args.path.split(':'), task, model_arg_overrides=eval(args.model_overrides),
     )
+    args.copy_ext_dict = getattr(_model_args, "copy_attention", False)
 
     # Set dictionaries
     src_dict = task.source_dictionary
@@ -102,6 +104,8 @@ def main(args):
     # Load alignment dictionary for unknown word replacement
     # (None if no unknown word replacement, empty if no path to align dictionary)
     align_dict = utils.load_align_dict(args.replace_unk)
+    if align_dict is None and args.copy_ext_dict:
+        align_dict = {}
 
     max_positions = utils.resolve_max_positions(
         task.max_positions(),
@@ -112,11 +116,13 @@ def main(args):
         print('| Sentence buffer size:', args.buffer_size)
     print('| Type the input sentence and press return:')
     start_id = 0
+    src_strs = []
     for inputs in buffered_read(args.input, args.buffer_size):
         results = []
         for batch in make_batches(inputs, args, task, max_positions):
             src_tokens = batch.src_tokens
             src_lengths = batch.src_lengths
+            src_strs.extend(batch.src_strs)
             if use_cuda:
                 src_tokens = src_tokens.cuda()
                 src_lengths = src_lengths.cuda()
@@ -142,7 +148,7 @@ def main(args):
             for hypo in hypos[:min(len(hypos), args.nbest)]:
                 hypo_tokens, hypo_str, alignment = utils.post_process_prediction(
                     hypo_tokens=hypo['tokens'].int().cpu(),
-                    src_str=src_str,
+                    src_str=src_strs[id],
                     alignment=hypo['alignment'].int().cpu() if hypo['alignment'] is not None else None,
                     align_dict=align_dict,
                     tgt_dict=tgt_dict,

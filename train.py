@@ -14,6 +14,8 @@ import itertools
 import os
 import math
 import random
+import subprocess
+import time
 
 import torch
 
@@ -22,6 +24,7 @@ from fairseq.data import iterators
 from fairseq.trainer import Trainer
 from fairseq.meters import AverageMeter, StopwatchMeter
 from fairseq.utils import import_user_module
+from fairseq.models import ema_reverse, ema_restore
 
 
 def main(args, init_distributed=False):
@@ -67,6 +70,8 @@ def main(args, init_distributed=False):
     dummy_batch = task.dataset('train').get_dummy_batch(args.max_tokens, max_positions)
     oom_batch = task.dataset('train').get_dummy_batch(1, max_positions)
 
+    model.copy_pretrained_params(args)
+
     # Build trainer
     trainer = Trainer(args, task, model, criterion, dummy_batch, oom_batch)
     print('| training on {} GPUs'.format(args.distributed_world_size))
@@ -107,6 +112,13 @@ def main(args, init_distributed=False):
 
         if epoch_itr.epoch % args.validate_interval == 0:
             valid_losses = validate(args, trainer, task, epoch_itr, valid_subsets)
+            # ema process
+            if not args.no_ema:
+                old_data = ema_restore(trainer.ema, trainer.model)
+                valid_losses_ema = validate(args, trainer, task, epoch_itr, valid_subsets)
+                if epoch_itr.epoch % args.save_interval == 0:
+                    save_checkpoint(args, trainer, epoch_itr, valid_losses_ema[0], suffix='ema')
+                ema_reverse(trainer.ema, trainer.model, old_data)
 
         # only use first validation loss to update the learning rate
         lr = trainer.lr_step(epoch_itr.epoch, valid_losses[0])
@@ -189,6 +201,7 @@ def get_training_stats(trainer):
         stats['nll_loss'] = nll_loss
     else:
         nll_loss = trainer.get_meter('train_loss')
+    stats['copy_alpha'] = trainer.get_meter('copy_alpha')
     stats['ppl'] = get_perplexity(nll_loss.avg)
     stats['wps'] = trainer.get_meter('wps')
     stats['ups'] = trainer.get_meter('ups')
@@ -279,7 +292,7 @@ def get_perplexity(loss):
         return float('inf')
 
 
-def save_checkpoint(args, trainer, epoch_itr, val_loss):
+def save_checkpoint(args, trainer, epoch_itr, val_loss, suffix=''):
     if args.no_save or not distributed_utils.is_master(args):
         return
     epoch = epoch_itr.epoch
@@ -287,23 +300,24 @@ def save_checkpoint(args, trainer, epoch_itr, val_loss):
     updates = trainer.get_num_updates()
 
     checkpoint_conds = collections.OrderedDict()
-    checkpoint_conds['checkpoint{}.pt'.format(epoch)] = (
+    checkpoint_conds['checkpoint{}{}.pt'.format(suffix, epoch)] = (
             end_of_epoch and not args.no_epoch_checkpoints and
             epoch % args.save_interval == 0
     )
-    checkpoint_conds['checkpoint_{}_{}.pt'.format(epoch, updates)] = (
+    checkpoint_conds['checkpoint{}_{}_{}.pt'.format(suffix, epoch, updates)] = (
             not end_of_epoch and args.save_interval_updates > 0 and
             updates % args.save_interval_updates == 0
     )
     checkpoint_conds['checkpoint_best.pt'] = (
-            val_loss is not None and
+            val_loss is not None and len(suffix) == 0 and
             (not hasattr(save_checkpoint, 'best') or val_loss < save_checkpoint.best)
     )
-    checkpoint_conds['checkpoint_last.pt'] = True  # keep this last so that it's a symlink
+    checkpoint_conds['checkpoint{}_last.pt'.format(suffix)] = True  # keep this last so that it's a symlink
 
-    prev_best = getattr(save_checkpoint, 'best', val_loss)
-    if val_loss is not None:
-        save_checkpoint.best = min(val_loss, prev_best)
+    if len(suffix) == 0: # update best only when suffix is empty
+        prev_best = getattr(save_checkpoint, 'best', val_loss)
+        if val_loss is not None:
+            save_checkpoint.best = min(val_loss, prev_best)
     extra_state = {
         'train_iterator': epoch_itr.state_dict(),
         'val_loss': val_loss,
@@ -325,7 +339,7 @@ def save_checkpoint(args, trainer, epoch_itr, val_loss):
 
     if args.keep_last_epochs > 0:
         # remove old epoch checkpoints; checkpoints are sorted in descending order
-        checkpoints = utils.checkpoint_paths(args.save_dir, pattern=r'checkpoint\d+\.pt')
+        checkpoints = utils.checkpoint_paths(args.save_dir, pattern=r'checkpoint' +  suffix + '\d+\.pt')
         for old_chk in checkpoints[args.keep_last_epochs:]:
             if os.path.lexists(old_chk):
                 os.remove(old_chk)
@@ -383,6 +397,16 @@ def distributed_main(i, args):
 def cli_main():
     parser = options.get_training_parser()
     args = options.parse_args_and_arch(parser)
+
+    try:
+        git_branch = subprocess.check_output(['git', 'symbolic-ref', '--short', 'HEAD'])
+        git_revision = subprocess.check_output(['git', 'rev-parse', 'HEAD'])
+    except:
+        git_branch = 'unknown'
+        git_revision = 'unknown'
+    print('GIT: {} {}'.format(git_branch, git_revision))
+    print(time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()))
+    print('-' * 80)
 
     if args.distributed_init_method is None:
         distributed_utils.infer_init_method(args)

@@ -25,13 +25,16 @@ class Binarizer:
 
     @staticmethod
     def binarize(filename, dict, consumer, tokenize=tokenize_line, append_eos=True, reverse_order=False,
-                 offset=0, end=-1):
+                 offset=0, end=-1, copy_ext_dict=False, copy_src_words=None):
         nseq, ntok = 0, 0
         replaced = Counter()
+        copied = Counter()
 
         def replaced_consumer(word, idx):
-            if idx == dict.unk_index and word != dict.unk_word:
+            if (idx == dict.unk_index or idx >= len(dict)) and word != dict.unk_word:
                 replaced.update([word])
+            if idx >= len(dict) and copy_src_words is not None:
+                copied.update([word])
 
         with open(filename, 'r', encoding='utf-8') as f:
             f.seek(offset)
@@ -40,19 +43,23 @@ class Binarizer:
             while line:
                 if end > 0 and f.tell() > end:
                     break
-                ids = dict.encode_line(
+                words = []
+                ids = dict.encode_line(  # todo: change all encode_line
                         line=line,
                         line_tokenizer=tokenize,
                         add_if_not_exist=False,
                         consumer=replaced_consumer,
                         append_eos=append_eos,
                         reverse_order=reverse_order,
+                        copy_ext_dict=copy_ext_dict,
+                        copy_src_words=None if copy_src_words is None else copy_src_words[nseq],
+                        out_words=words,
                 )
                 nseq += 1
                 ntok += len(ids)
-                consumer(ids)
+                consumer(ids, words)
                 line = f.readline()
-        return {'nseq': nseq, 'nunk': sum(replaced.values()), 'ntok': ntok, 'replaced': replaced}
+        return {'nseq': nseq, 'nunk': sum(replaced.values()), 'ntok': ntok, 'replaced': replaced, 'copied': copied}
 
     @staticmethod
     def find_offsets(filename, num_chunks):

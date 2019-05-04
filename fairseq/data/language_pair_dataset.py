@@ -52,6 +52,14 @@ def collate(
             prev_output_tokens = prev_output_tokens.index_select(0, sort_order)
     else:
         ntokens = sum(len(s['source']) for s in samples)
+    
+    src_label, tgt_label = None, None
+    if samples[0].get('source_label', None) is not None:
+        src_label = merge('source_label', left_pad=left_pad_target)
+        src_label = src_label.index_select(0, sort_order)
+    if samples[0].get('target_label', None) is not None:
+        tgt_label = merge('target_label', left_pad=left_pad_target)
+        tgt_label = tgt_label.index_select(0, sort_order)
 
     batch = {
         'id': id,
@@ -62,6 +70,8 @@ def collate(
             'src_lengths': src_lengths,
         },
         'target': target,
+        'source_label': src_label,
+        'target_label': tgt_label,
     }
     if prev_output_tokens is not None:
         batch['net_input']['prev_output_tokens'] = prev_output_tokens
@@ -99,8 +109,8 @@ class LanguagePairDataset(FairseqDataset):
     """
 
     def __init__(
-        self, src, src_sizes, src_dict,
-        tgt=None, tgt_sizes=None, tgt_dict=None,
+        self, src, src_sizes, src_dict, src_label,
+        tgt=None, tgt_sizes=None, tgt_dict=None, tgt_label=None,
         left_pad_source=True, left_pad_target=False,
         max_source_positions=1024, max_target_positions=1024,
         shuffle=True, input_feeding=True, remove_eos_from_source=False, append_eos_to_target=False,
@@ -115,6 +125,8 @@ class LanguagePairDataset(FairseqDataset):
         self.tgt_sizes = np.array(tgt_sizes) if tgt_sizes is not None else None
         self.src_dict = src_dict
         self.tgt_dict = tgt_dict
+        self.src_label = src_label
+        self.tgt_label = tgt_label
         self.left_pad_source = left_pad_source
         self.left_pad_target = left_pad_target
         self.max_source_positions = max_source_positions
@@ -127,6 +139,8 @@ class LanguagePairDataset(FairseqDataset):
     def __getitem__(self, index):
         tgt_item = self.tgt[index] if self.tgt is not None else None
         src_item = self.src[index]
+        src_label_item = self.src_label[index] if self.src_label is not None else None
+        tgt_label_item = self.tgt_label[index] if self.tgt_label is not None else None
         # Append EOS to end of tgt sentence if it does not have an EOS and remove
         # EOS from end of src sentence if it exists. This is useful when we use
         # use existing datasets for opposite directions i.e., when we want to
@@ -135,6 +149,8 @@ class LanguagePairDataset(FairseqDataset):
             eos = self.tgt_dict.eos() if self.tgt_dict else self.src_dict.eos()
             if self.tgt and self.tgt[index][-1] != eos:
                 tgt_item = torch.cat([self.tgt[index], torch.LongTensor([eos])])
+                if tgt_label_item is not None:
+                    tgt_label_item = torch.cat([self.tgt_label[index], torch.IntTensor([0])])
 
         if self.remove_eos_from_source:
             eos = self.src_dict.eos()
@@ -145,6 +161,8 @@ class LanguagePairDataset(FairseqDataset):
             'id': index,
             'source': src_item,
             'target': tgt_item,
+            'source_label': src_label_item,
+            'target_label': tgt_label_item, 
         }
 
     def __len__(self):
@@ -198,6 +216,8 @@ class LanguagePairDataset(FairseqDataset):
                 'id': i,
                 'source': self.src_dict.dummy_sentence(src_len),
                 'target': self.tgt_dict.dummy_sentence(tgt_len) if self.tgt_dict is not None else None,
+                'source_label': None,
+                'target_label': None
             }
             for i in range(bsz)
         ])

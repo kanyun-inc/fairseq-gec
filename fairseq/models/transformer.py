@@ -6,6 +6,7 @@
 # can be found in the PATENTS file in the same directory.
 
 import math
+import os
 
 import torch
 import torch.nn as nn
@@ -96,6 +97,14 @@ class TransformerModel(FairseqModel):
                                  'Must be used with adaptive_loss criterion'),
         parser.add_argument('--adaptive-softmax-dropout', type=float, metavar='D',
                             help='sets adaptive softmax dropout for the tail projections')
+        parser.add_argument('--copy-attention', default=False, action='store_true',
+                            help='train transformer decoder with copy attention')
+        parser.add_argument('--copy-attention-heads', type=int, metavar='N', default=1,
+                            help='num copy layer attention heads')
+        parser.add_argument('--copy-attention-dropout', type=float, metavar='D', default=0.,
+                            help='num copy layer attention dropout')
+        parser.add_argument('--pretrained-model', type=str, default='', 
+                            help='path to the pre-trained model')
         # fmt: on
 
     @classmethod
@@ -147,6 +156,27 @@ class TransformerModel(FairseqModel):
         encoder = TransformerEncoder(args, src_dict, encoder_embed_tokens)
         decoder = TransformerDecoder(args, tgt_dict, decoder_embed_tokens)
         return TransformerModel(encoder, decoder)
+
+    def copy_pretrained_params(self, args):
+        if len(args.pretrained_model) > 0:
+            assert os.path.exists(args.pretrained_model), '%s does not exist' % args.pretrained_model
+            print('Load params from %s...' % args.pretrained_model)
+            states = torch.load(args.pretrained_model)['model']
+            for name, p in self.named_parameters():
+                if name in states and p.size() == states[name].size():
+                    print('Load %s...' % name)
+                    p.data.copy_(states[name])
+                elif name in states:
+                    print('WARNING: %s size mismatch, checkpoint:' % name, states[name].size(), ' model:', p.data.size())
+                    ckt_sz = states[name].size()
+                    if len(p.data.size()) == 1:
+                        p.data[:ckt_sz[0]].copy_(states[name])
+                    elif len(p.data.size()) == 2:
+                        p.data[:ckt_sz[0], :ckt_sz[1]].copy_(states[name])
+                    else:
+                        assert False
+                else:
+                    print('WARNING: can not find %s in checkpoint' % name)
 
 
 @register_model('transformer_lm')
@@ -310,6 +340,10 @@ class TransformerEncoder(FairseqEncoder):
                 - **encoder_padding_mask** (ByteTensor): the positions of
                   padding elements of shape `(batch, src_len)`
         """
+        # map oov tokens to unk tokens
+        input_src_tokens = src_tokens
+        src_tokens = src_tokens.masked_fill(src_tokens >= len(self.dictionary), self.dictionary.unk_index)
+
         # embed tokens and positions
         x = self.embed_scale * self.embed_tokens(src_tokens)
         if self.embed_positions is not None:
@@ -334,6 +368,7 @@ class TransformerEncoder(FairseqEncoder):
         return {
             'encoder_out': x,  # T x B x C
             'encoder_padding_mask': encoder_padding_mask,  # B x T
+            'src_tokens': input_src_tokens, # B x T
         }
 
     def reorder_encoder_out(self, encoder_out, new_order):
@@ -353,6 +388,9 @@ class TransformerEncoder(FairseqEncoder):
         if encoder_out['encoder_padding_mask'] is not None:
             encoder_out['encoder_padding_mask'] = \
                 encoder_out['encoder_padding_mask'].index_select(0, new_order)
+        if encoder_out['src_tokens'] is not None:
+            encoder_out['src_tokens'] = \
+                encoder_out['src_tokens'].index_select(0, new_order)
         return encoder_out
 
     def max_positions(self):
@@ -446,6 +484,14 @@ class TransformerDecoder(FairseqIncrementalDecoder):
         if self.normalize:
             self.layer_norm = LayerNorm(embed_dim)
 
+        self.copy_attention = args.copy_attention
+        self.attention_dropout = args.attention_dropout
+        if self.copy_attention:
+            self.copy_attn_layer = MultiheadAttention(
+                embed_dim, args.copy_attention_heads, dropout=args.copy_attention_dropout)
+            self.copy_alpha_linear = nn.Linear(embed_dim, 1)
+            #torch.nn.init.constant_(self.copy_alpha_linear.bias, 1.)
+
     def forward(self, prev_output_tokens, encoder_out=None, incremental_state=None):
         """
         Args:
@@ -474,6 +520,10 @@ class TransformerDecoder(FairseqIncrementalDecoder):
             if positions is not None:
                 positions = positions[:, -1:]
 
+        # map oov tokens to unk tokens
+        prev_output_tokens = prev_output_tokens.masked_fill(
+            prev_output_tokens >= self.embed_tokens.num_embeddings, self.dictionary.unk_index)
+
         # embed tokens and positions
         x = self.embed_scale * self.embed_tokens(prev_output_tokens)
 
@@ -500,9 +550,27 @@ class TransformerDecoder(FairseqIncrementalDecoder):
                 self_attn_mask=self.buffered_future_mask(x) if incremental_state is None else None,
             )
             inner_states.append(x)
+        
+        copy_attn, copy_alpha = None, None
+        if self.copy_attention:
+            assert encoder_out is not None, \
+                "--copy-attn can't be used with decoder only architecture"
+            x_copy, copy_attn = self.copy_attn_layer(
+                query=x,
+                key=encoder_out['encoder_out'],
+                value=encoder_out['encoder_out'],
+                key_padding_mask=encoder_out['encoder_padding_mask'],
+                incremental_state=incremental_state,
+                static_kv=True,
+                need_weights=True,
+            )
+            x_copy = x_copy.transpose(0, 1)
+            copy_alpha = torch.sigmoid(self.copy_alpha_linear(x_copy))
+            attn = copy_attn # use copy attn for alignment
+
 
         if self.normalize:
-            x = self.layer_norm(x)
+            x = self.layer_norm(x) # todo: layer norm
 
         # T x B x C -> B x T x C
         x = x.transpose(0, 1)
@@ -516,8 +584,9 @@ class TransformerDecoder(FairseqIncrementalDecoder):
                 x = F.linear(x, self.embed_tokens.weight)
             else:
                 x = F.linear(x, self.embed_out)
-
-        return x, {'attn': attn, 'inner_states': inner_states}
+        
+        return x, {'attn': attn, 'inner_states': inner_states, 
+            'copy_attn': copy_attn, 'copy_alpha': copy_alpha, 'src_tokens': encoder_out['src_tokens']}
 
     def max_positions(self):
         """Maximum output length supported by the decoder."""
@@ -561,6 +630,49 @@ class TransformerDecoder(FairseqIncrementalDecoder):
             state_dict['{}.version'.format(name)] = torch.Tensor([1])
 
         return state_dict
+
+    def get_normalized_probs(self, net_output, log_probs, sample):
+        """Get normalized probabilities (or log probs) from a net's output."""
+
+        if not self.copy_attention:
+            return super().get_normalized_probs(net_output, log_probs, sample)
+
+        logits = net_output[0].float()
+
+        copy_attn = net_output[1]['copy_attn']
+        copy_alpha = net_output[1]['copy_alpha']
+        src_tokens = net_output[1]['src_tokens']
+        src_len = src_tokens.size(1)
+
+        is_incre = len(logits.size()) == 2
+        if is_incre:
+            logits = logits.unsqueeze(1)
+
+        src_tokens = src_tokens.unsqueeze(1).repeat(1, logits.size(1), 1)
+
+        scores = F.softmax(logits, dim=-1)
+        ext_scores = torch.zeros(scores.size(0), scores.size(1), src_len).float()
+        if src_tokens.device.type == 'cuda':
+            ext_scores = ext_scores.cuda()
+        composite_scores = torch.cat([scores, ext_scores], dim=-1)
+        
+        # set copy_alpha to 0.5 half of the time
+        #if self.training and torch.rand(1).item() < 0.8:
+        #    copy_alpha = 0.5
+            
+        composite_scores = copy_alpha * composite_scores
+        copy_scores = (1 - copy_alpha) * copy_attn
+        composite_scores.scatter_add_(-1, src_tokens, copy_scores)
+
+        if is_incre:
+            composite_scores = composite_scores.squeeze(1)
+
+        if log_probs:
+            result = torch.log(composite_scores + 1e-12)
+        else:
+            result = composite_scores
+
+        return result
 
 
 class TransformerEncoderLayer(nn.Module):
@@ -815,6 +927,9 @@ def base_lm_architecture(args):
     args.tie_adaptive_weights = getattr(args, 'tie_adaptive_weights', False)
     args.tie_adaptive_proj = getattr(args, 'tie_adaptive_proj', False)
 
+    args.copy_attention = getattr(args, 'copy_attention', False)
+    args.copy_attention_heads = getattr(args, 'copy_attention_heads', 1)
+
 
 @register_model_architecture('transformer_lm', 'transformer_lm_big')
 def transformer_lm_big(args):
@@ -865,6 +980,9 @@ def base_architecture(args):
 
     args.decoder_output_dim = getattr(args, 'decoder_output_dim', args.decoder_embed_dim)
     args.decoder_input_dim = getattr(args, 'decoder_input_dim', args.decoder_embed_dim)
+
+    args.copy_attention = getattr(args, 'copy_attention', False)
+    args.copy_attention_heads = getattr(args, 'copy_attention_heads', 1)
 
 
 @register_model_architecture('transformer', 'transformer_iwslt_de_en')

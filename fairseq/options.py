@@ -208,6 +208,8 @@ def add_preprocess_args(parser):
                        help="Pad dictionary size to be multiple of N")
     group.add_argument("--workers", metavar="N", default=1, type=int,
                        help="number of parallel workers")
+    group.add_argument("--copy-ext-dict", action="store_true",
+                       help="Enable copy extended dictionary")
     # fmt: on
     return parser
 
@@ -235,6 +237,8 @@ def add_dataset_args(parser, train=False, gen=False):
                                 ' (defaults to --max-sentences)')
         group.add_argument('--curriculum', default=0, type=int, metavar='N',
                            help='don\'t shuffle batches for first N epochs')
+        group.add_argument('--positive-label-weight', default=1, type=float, metavar='FP',
+                           help='positive example loss weight')
     if gen:
         group.add_argument('--gen-subset', default='test', metavar='SPLIT',
                            help='data subset to generate (train, valid, test)')
@@ -291,6 +295,10 @@ def add_optimization_args(parser):
     group.add_argument('--update-freq', default='1', metavar='N1,N2,...,N_K',
                        type=lambda uf: eval_str_list(uf, type=int),
                        help='update parameters every N_i batches, when in epoch i')
+    group.add_argument('--ema-decay', default=0.9999, type=float, metavar='D',
+                       help='exponetail moving average decay')
+    group.add_argument('--no-ema', action='store_true', 
+                       help='disable exponetial moving average')
 
     # Optimizer definitions can be found under fairseq/optim/
     group.add_argument('--optimizer', default='nag', metavar='OPT',

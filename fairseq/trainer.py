@@ -17,6 +17,7 @@ import torch
 from fairseq import distributed_utils, models, optim, utils
 from fairseq.meters import AverageMeter, StopwatchMeter, TimeMeter
 from fairseq.optim import lr_scheduler
+from fairseq.models import EMA, ema_init, ema_step
 
 
 class Trainer(object):
@@ -52,6 +53,7 @@ class Trainer(object):
         self._optimizer = None
         self._prev_grad_norm = None
         self._wrapped_model = None
+        self._ema = None 
 
         self.init_meters(args)
 
@@ -61,6 +63,7 @@ class Trainer(object):
         self.meters['train_nll_loss'] = AverageMeter()
         self.meters['valid_loss'] = AverageMeter()
         self.meters['valid_nll_loss'] = AverageMeter()
+        self.meters['copy_alpha'] = AverageMeter()
         self.meters['wps'] = TimeMeter()       # words per second
         self.meters['ups'] = TimeMeter()       # updates per second
         self.meters['wpb'] = AverageMeter()    # words per batch
@@ -95,6 +98,13 @@ class Trainer(object):
         if self._lr_scheduler is None:
             self._build_optimizer()  # this will initialize self._lr_scheduler
         return self._lr_scheduler
+    
+    @property
+    def ema(self):
+        if self._ema is None:
+            self._ema = EMA(self.args.ema_decay)
+            ema_init(self._ema, self.model)
+        return self._ema
 
     def _build_optimizer(self):
         params = list(filter(lambda p: p.requires_grad, self.model.parameters()))
@@ -255,6 +265,8 @@ class Trainer(object):
             # take an optimization step
             self.optimizer.step()
             self._num_updates += 1
+            if not self.args.no_ema:
+                ema_step(self.ema, self.model, self._num_updates)
 
             # update learning rate
             self.lr_scheduler.step_update(self._num_updates)
@@ -267,6 +279,7 @@ class Trainer(object):
             self.meters['wpb'].update(ntokens)
             self.meters['bsz'].update(nsentences)
             self.meters['gnorm'].update(grad_norm)
+            self.meters['copy_alpha'].update(logging_output.get('copy_alpha'))
             self.meters['clip'].update(
                 1. if grad_norm > self.args.clip_norm and self.args.clip_norm > 0 else 0.
             )

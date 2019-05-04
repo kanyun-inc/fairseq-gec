@@ -218,7 +218,8 @@ class Dictionary(object):
         return t
 
     def encode_line(self, line, line_tokenizer=tokenize_line, add_if_not_exist=True,
-                    consumer=None, append_eos=True, reverse_order=False):
+                    consumer=None, append_eos=True, reverse_order=False, copy_ext_dict=False, copy_src_words=None,
+                    out_words=None):
         words = line_tokenizer(line)
         if reverse_order:
             words = list(reversed(words))
@@ -230,11 +231,24 @@ class Dictionary(object):
                 idx = self.add_symbol(word)
             else:
                 idx = self.index(word)
+                if copy_ext_dict and idx == self.unk_index:
+                    if copy_src_words is not None:  # replace target unk with copy extended dict
+                        if word in copy_src_words:
+                            position = copy_src_words.index(word)
+                            idx = position + len(self)
+                    else:
+                        position = words.index(word)  # replace source unk with copy extended dict
+                        idx = position + len(self)
+
             if consumer is not None:
                 consumer(word, idx)
             ids[i] = idx
         if append_eos:
             ids[nwords] = self.eos_index
+
+        if out_words is not None:
+            out_words.extend(words) # return words through parameters.
+
         return ids
 
     @staticmethod

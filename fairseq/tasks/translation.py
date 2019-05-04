@@ -16,6 +16,7 @@ from fairseq.data import (
     IndexedCachedDataset,
     IndexedDataset,
     IndexedRawTextDataset,
+    IndexedRawLabelDataset,
     LanguagePairDataset,
 )
 
@@ -57,6 +58,8 @@ class TranslationTask(FairseqTask):
                             help='load the dataset lazily')
         parser.add_argument('--raw-text', action='store_true',
                             help='load raw text dataset')
+        parser.add_argument('--copy-ext-dict', action='store_true', default=False,
+                            help='use copy extended dict')
         parser.add_argument('--left-pad-source', default='True', type=str, metavar='BOOL',
                             help='pad the source on the left')
         parser.add_argument('--left-pad-target', default='False', type=str, metavar='BOOL',
@@ -134,9 +137,9 @@ class TranslationTask(FairseqTask):
                 return True
             return False
 
-        def indexed_dataset(path, dictionary):
+        def indexed_dataset(path, dictionary, copy_ext_dict=False, src_dataset=None):
             if self.args.raw_text:
-                return IndexedRawTextDataset(path, dictionary)
+                return IndexedRawTextDataset(path, dictionary, copy_ext_dict=copy_ext_dict, src_dataset=src_dataset)
             elif IndexedDataset.exists(path):
                 if self.args.lazy_load:
                     return IndexedDataset(path, fix_lua_indexing=True)
@@ -144,8 +147,17 @@ class TranslationTask(FairseqTask):
                     return IndexedCachedDataset(path, fix_lua_indexing=True)
             return None
 
+        def indexed_label(path):
+            if IndexedRawLabelDataset.exists(path):
+                return IndexedRawLabelDataset(path)
+            else:
+                print('Label file not found: {}'.format(path))
+            return None
+
         src_datasets = []
         tgt_datasets = []
+        src_labels = []
+        tgt_labels = []
 
         data_paths = self.args.data
 
@@ -164,9 +176,16 @@ class TranslationTask(FairseqTask):
                         break
                     else:
                         raise FileNotFoundError('Dataset not found: {} ({})'.format(split, data_path))
+                src_dataset = indexed_dataset(prefix + src, self.src_dict, self.args.copy_ext_dict)
+                tgt_dataset = indexed_dataset(prefix + tgt, self.tgt_dict, self.args.copy_ext_dict, src_dataset)
+                src_datasets.append(src_dataset)
+                tgt_datasets.append(tgt_dataset)
 
-                src_datasets.append(indexed_dataset(prefix + src, self.src_dict))
-                tgt_datasets.append(indexed_dataset(prefix + tgt, self.tgt_dict))
+                label_prefix = os.path.join(data_path, '{}.label.'.format(split_k))
+                src_label = indexed_label(label_prefix + src + '.txt')
+                tgt_label = indexed_label(label_prefix + tgt + '.txt')
+                src_labels.append(src_label)
+                tgt_labels.append(tgt_label)
 
                 print('| {} {} {} examples'.format(data_path, split_k, len(src_datasets[-1])))
 
@@ -174,9 +193,11 @@ class TranslationTask(FairseqTask):
                     break
 
         assert len(src_datasets) == len(tgt_datasets)
-
+        
+        src_label, tgt_label = None, None
         if len(src_datasets) == 1:
             src_dataset, tgt_dataset = src_datasets[0], tgt_datasets[0]
+            src_label, tgt_label = src_labels[0], tgt_labels[0]
         else:
             sample_ratios = [1] * len(src_datasets)
             sample_ratios[0] = self.args.upsample_primary
@@ -184,8 +205,8 @@ class TranslationTask(FairseqTask):
             tgt_dataset = ConcatDataset(tgt_datasets, sample_ratios)
 
         self.datasets[split] = LanguagePairDataset(
-            src_dataset, src_dataset.sizes, self.src_dict,
-            tgt_dataset, tgt_dataset.sizes, self.tgt_dict,
+            src_dataset, src_dataset.sizes, self.src_dict, src_label,
+            tgt_dataset, tgt_dataset.sizes, self.tgt_dict, tgt_label,
             left_pad_source=self.args.left_pad_source,
             left_pad_target=self.args.left_pad_target,
             max_source_positions=self.args.max_source_positions,
@@ -193,7 +214,7 @@ class TranslationTask(FairseqTask):
         )
 
     def build_dataset_for_inference(self, src_tokens, src_lengths):
-        return LanguagePairDataset(src_tokens, src_lengths, self.source_dictionary)
+        return LanguagePairDataset(src_tokens, src_lengths, self.source_dictionary, None)
 
     def max_positions(self):
         """Return the max sentence length allowed by the task."""
