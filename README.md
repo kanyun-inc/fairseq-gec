@@ -47,8 +47,8 @@ We have public our pre-trained models as mentioned in the downloads part. We lis
 ```
 1. # prepare target sentences using one billion benchmark dataset
 2. sh noise.sh # generate the noised source sentences 
-3. sh preprocess_noise_data.sh # preprocess data
-4. sh pretrain.sh 0,1 _pretrain # pretrain 
+3. bash preprocess_noise_data.sh # preprocess data
+4. bash pretrain.sh 0,1 _pretrain # pretrain 
 ```
 
 ## Acknowledgments
