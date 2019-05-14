@@ -5,7 +5,8 @@ pretrained_model=./out/models_pretrain/checkpoint9.pt
 
 CUDA_VISIBLE_DEVICES=$device nohup python train.py $DATA_BIN \
 --save-dir $MODELS \
---max-epoch 8 \
+--seed 4321 \
+--max-epoch 9 \
 --batch-size 64 \
 --max-tokens 3000 \
 --train-subset train \

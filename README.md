@@ -20,8 +20,13 @@ sh download.sh
 ```
 
 - Download **pre-processed data** & **pre-trained models**
- 
-> upload later
+  
+  pre-trained model: 
+    - url: https://pan.baidu.com/s/1hCwQeNFjng_0_NiViJq6fg 
+    - code: mxrf
+    
+  pre-processed data:
+    > upload later 
 
 ## Train with the pre-trained model
 ```
