@@ -21,9 +21,9 @@ sh download.sh
 
 - Download **pre-processed data** & **pre-trained models**
   
-  pre-trained model: 
-    - url: https://pan.baidu.com/s/1hCwQeNFjng_0_NiViJq6fg 
-    - code: mxrf
+  pre-trained model: (Google Drive/Baidu Pan) 
+    - url1: https://drive.google.com/file/d/1zewifHUUwvqc2F-MfDRsZFio6PlSzx2c/view?usp=sharing
+    - url2: https://pan.baidu.com/s/1hCwQeNFjng_0_NiViJq6fg (code: mxrf)
     
   pre-processed data:
     > upload later 
