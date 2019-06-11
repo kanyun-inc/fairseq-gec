@@ -25,8 +25,8 @@ sh download.sh
     - url1: https://drive.google.com/file/d/1zewifHUUwvqc2F-MfDRsZFio6PlSzx2c/view?usp=sharing
     - url2: https://pan.baidu.com/s/1hCwQeNFjng_0_NiViJq6fg (code: mxrf)
     
-  pre-processed data:
-    > upload later 
+  pre-processed data: (Google Drive)(train/valid/test)
+    - url: https://drive.google.com/open?id=17s-TZiM6ilQ-SHklxTUun2Jdgg8B9zS3  
 
 ## Train with the pre-trained model
 ```
