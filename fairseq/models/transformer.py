@@ -640,6 +640,8 @@ class TransformerDecoder(FairseqIncrementalDecoder):
         logits = net_output[0].float()
 
         copy_attn = net_output[1]['copy_attn']
+        copy_attn = torch.clamp(copy_attn, 0, 1) # fix neg loss bug
+        
         copy_alpha = net_output[1]['copy_alpha']
         src_tokens = net_output[1]['src_tokens']
         src_len = src_tokens.size(1)
