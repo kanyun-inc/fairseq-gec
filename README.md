@@ -31,7 +31,7 @@ sh download.sh
 ## Train with the pre-trained model
 ```
 cd fairseq-gec
-pip install --editable
+pip install --editable .
 sh train.sh \${device_id} \${experiment_name}
 ```
 
