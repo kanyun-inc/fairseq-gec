@@ -36,8 +36,8 @@ def create_parallel_corpus(
 
     logger.debug('READ %s set ... %s' % (name, fi))
 
-    fo_src = open(os.path.join(fo, 'src.{}.txt'.format(name)), 'w')
-    fo_tgt = open(os.path.join(fo, 'tgt.{}.txt'.format(name)), 'w')
+    fo_src = open(os.path.join(fo, '{}.src'.format(name)), 'w')
+    fo_tgt = open(os.path.join(fo, '{}.tgt'.format(name)), 'w')
 
     for idx, line in enumerate(open(fi), start=1):
         line = json.loads(line.rstrip())
