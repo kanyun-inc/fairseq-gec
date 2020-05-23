@@ -1,10 +1,10 @@
 #!user/bin/bash
 
 SRC="preprocess/src"
-CoNLL="datasets/conll05"          # path of downloaded CoNLL-datasets
-CoNLL_to_JSON="datasets/json"     #         JSONed CoNLL05-datasets
-PARALLEL="datasets/parallel"      #         parallel corpus
-FAIRDDIR="SRL-S2S/data/conll05"   #         preprocessed data for using fairseq
+CoNLL="datasets/conll05"                    # path of downloaded CoNLL-datasets
+CoNLL_to_JSON="datasets/json"               #         JSONed CoNLL05-datasets
+PARALLEL="datasets/parallel"                #         parallel corpus
+FAIRDDIR="datasets/preprocessed/conll05"    #         preprocessed data for using fairseq
 
 TRAIN_PREF="${PARALLEL}/train"    # prefix of parallel train set
 DEV_PREF="${PARALLEL}/dev"        #                    dev set
