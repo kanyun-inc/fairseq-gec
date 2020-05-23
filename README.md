@@ -1,4 +1,17 @@
-# Introduction
+# Experimental Settings (my extension)
+
+## Data Preprocessing from CoNLL05
+* test set が wsj に設定されている
+``` running fairseq-preprocess
+$ bash preprocess/create_preprocess_data.sh
+```
+
+
+
+
+
+
+# Introduction (source)
 
 Source code for the paper: 
 **Improving Grammatical Error Correction via Pre-Training a Copy-Augmented Architecture with Unlabeled Data**
