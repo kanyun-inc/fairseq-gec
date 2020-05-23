@@ -1,7 +1,11 @@
 # Experimental Settings (my extension)
 
+## Experimental Settings
+* Various experimental values for SRL are written in `./srl_setting.sh`
+
+
 ## Data Preprocessing from CoNLL05
-* test set が wsj に設定されている
+* using** ____**WSJ as test set (need to rewrite the following  file to use Brown)
 ``` running fairseq-preprocess
 $ bash preprocess/create_preprocess_data.sh
 ```
