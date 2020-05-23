@@ -4,12 +4,11 @@ set -eux
 
 USAGE="Usage: bash run.sh -g [GPU_ID] -m [MODE]"
 
-while getopts g:m:o: OPT
+while getopts g:m: OPT
 do
   case ${OPT} in
     "g" ) FLG_G="TRUE"; GPU_ID=${OPTARG};;
     "m" ) FLG_M="TRUE"; MODE=${OPTARG};;
-    "o" ) FLG_O="TRUE"; SAVE_DIR=${OPTARG};;
     * ) echo ${USAGE} 1>&2
         exit 1 ;;
   esac
