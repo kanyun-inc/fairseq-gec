@@ -12,6 +12,7 @@ Train a new model on one or across multiple GPUs.
 import collections
 import itertools
 import os
+import sys
 import math
 import random
 import subprocess
@@ -26,6 +27,15 @@ from fairseq.meters import AverageMeter, StopwatchMeter
 from fairseq.utils import import_user_module
 from fairseq.models import ema_reverse, ema_restore
 
+from logging import basicConfig, getLogger, NOTSET
+logging.basicConfig(
+    format='%(asctime)s #%(lineno)s __%(levelname)s__ %(name)s :::  %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S',
+    level=logging.NOTSET,
+    stream=sys.stdout,
+)
+logger = logging(__name__)
+
 
 def main(args, init_distributed=False):
     import_user_module(args)
@@ -39,18 +49,22 @@ def main(args, init_distributed=False):
     torch.manual_seed(args.seed)
 
     # Setup task, e.g., translation, language modeling, etc.
+    logger.notset('Setup task')
     task = tasks.setup_task(args)
 
     # Load dataset splits
+    logger.notset('Load dataset splits')
     load_dataset_splits(task, ['train', 'valid'])
 
     # Initialize distributed training (after data loading)
+    logger.notset('Initialize distributed training')
     if init_distributed:
         import socket
         args.distributed_rank = distributed_utils.distributed_init(args)
         print('| initialized host {} as rank {}'.format(socket.gethostname(), args.distributed_rank))
 
     # Build model and criterion
+    logger.notset('Build model and criterion')
     model = task.build_model(args)
     criterion = task.build_criterion(args)
     print(model)
@@ -73,6 +87,7 @@ def main(args, init_distributed=False):
     model.copy_pretrained_params(args)
 
     # Build trainer
+    logger.notset('Build trainer')
     trainer = Trainer(args, task, model, criterion, dummy_batch, oom_batch)
     print('| training on {} GPUs'.format(args.distributed_world_size))
     print('| max tokens per GPU = {} and max sentences per GPU = {}'.format(
@@ -81,6 +96,7 @@ def main(args, init_distributed=False):
     ))
 
     # Initialize dataloader
+    logger.notset('Initialize dataloader')
     epoch_itr = task.get_batch_iterator(
         dataset=task.dataset(args.train_subset),
         max_tokens=args.max_tokens,
@@ -96,9 +112,11 @@ def main(args, init_distributed=False):
 
     # Load the latest checkpoint if one is available
     if not load_checkpoint(args, trainer, epoch_itr):
+        logger.notset('Load the latest checkpoint')
         trainer.dummy_train_step([dummy_batch])
 
     # Train until the learning rate gets too small
+    logger.debug('TRAIN')
     max_epoch = args.max_epoch or math.inf
     max_update = args.max_update or math.inf
     lr = trainer.get_lr()
