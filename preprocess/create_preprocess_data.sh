@@ -100,5 +100,5 @@ else
 fi
 
 echo "=== DONE! ==="
-echo "preprocessed against dataset ... ${OUT}"
+echo "preprocessed against dataset ... ${OUT}/"
 echo "next ... run.sh"
