@@ -101,4 +101,5 @@ fi
 
 echo "=== DONE! ==="
 echo "preprocessed against dataset ... ${OUT}/"
-echo "next ... run.sh"
+echo "next ..."
+echo "$ bash run.sh -g [GPU_ID] -m [MODE]"
