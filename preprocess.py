@@ -19,7 +19,18 @@ from fairseq.utils import import_user_module
 from multiprocessing import Pool
 
 import os
+import sys
 import shutil
+
+
+from logging import basicConfig, getLogger, DEBUG
+basicConfig(
+    format='%(asctime)s #%(lineno)s __%(levelname)s__  %(name)s :::  %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S',
+    level=DEBUG,
+    stream=sys.stdout,
+)
+logger = getLogger(__name__)
 
 
 def main(args):
@@ -33,22 +44,26 @@ def main(args):
     task = tasks.get_task(args.task)
 
     def train_path(lang):
+        ### return ${TRAIN_PREF}.${lang}
         return "{}{}".format(args.trainpref, ("." + lang) if lang else "")
 
     def file_name(prefix, lang):
+        ### return ${prefix}.${lang}
         fname = prefix
         if lang is not None:
             fname += ".{lang}".format(lang=lang)
         return fname
 
     def dest_path(prefix, lang):
+        ### return ${OUT}/${prefix}.${lang}
         return os.path.join(args.destdir, file_name(prefix, lang))
 
     def dict_path(lang):
+        ### return ${OUT}/dict.${lang}.txt
         return dest_path("dict", lang) + ".txt"
 
     def build_dictionary(filenames, src=False, tgt=False):
-        assert src ^ tgt
+        assert src ^ tgt    # XOR: (Assert if match)
         return task.build_dictionary(
             filenames,
             workers=args.workers,
@@ -58,9 +73,9 @@ def main(args):
         )
 
     if not args.srcdict and os.path.exists(dict_path(args.source_lang)):
-        raise FileExistsError(dict_path(args.source_lang))
+        raise FileExistsError(dict_path(args.source_lang))  # ${OUT}/dict.src.txt
     if target and not args.tgtdict and os.path.exists(dict_path(args.target_lang)):
-        raise FileExistsError(dict_path(args.target_lang))
+        raise FileExistsError(dict_path(args.target_lang))  # ${OUT}/dict.tgt.txt
 
     if args.copy_ext_dict:
         assert args.joined_dictionary, \
@@ -72,10 +87,13 @@ def main(args):
         assert not args.srcdict or not args.tgtdict, \
             "cannot use both --srcdict and --tgtdict with --joined-dictionary"
 
+        # loadable src else tgt
         if args.srcdict:
             src_dict = task.load_dictionary(args.srcdict)
         elif args.tgtdict:
             src_dict = task.load_dictionary(args.tgtdict)
+        
+        # not loadable both dict
         else:
             assert args.trainpref, "--trainpref must be set if --srcdict is not specified"
             src_dict = build_dictionary(
@@ -83,12 +101,15 @@ def main(args):
             )
         tgt_dict = src_dict
     else:
+
+        # src dictionary
         if args.srcdict:
             src_dict = task.load_dictionary(args.srcdict)
         else:
             assert args.trainpref, "--trainpref must be set if --srcdict is not specified"
             src_dict = build_dictionary([train_path(args.source_lang)], src=True)
 
+        # tgt dictionary (if None then None)
         if target:
             if args.tgtdict:
                 tgt_dict = task.load_dictionary(args.tgtdict)
@@ -99,8 +120,11 @@ def main(args):
             tgt_dict = None
 
     src_dict.save(dict_path(args.source_lang))
+    logger.info("save src_dict ... %s" % dict_path(args.source_lang))
+
     if target and tgt_dict is not None:
         tgt_dict.save(dict_path(args.target_lang))
+        logger.info("save tgt_dict ... %s" % dict_path(args.target_lang))
 
     def make_binary_dataset(vocab, input_prefix, output_prefix, lang, num_workers, copy_src_words=None):
         print("| [{}] Dictionary: {} types".format(lang, len(vocab) - 1))
@@ -277,6 +301,7 @@ def main(args):
                         ai = list(map(lambda x: tuple(x.split("-")), a.split()))
                         src_labels = np.ones(len(src_words), int)
                         tgt_labels = np.ones(len(tgt_words), int)
+                        import ipdb; ipdb.set_trace()
                         for sai, tai in ai:
                             if int(tai) >= len(tgt_words):
                                 print('Bad case:')
