@@ -1,15 +1,15 @@
 #!user/bin/bash
+source config.sh
 
+bash config.sh
 SRC="preprocess/src"
 CoNLL="datasets/conll05"                    # path of downloaded CoNLL-datasets
 CoNLL_to_JSON="datasets/json"               #         JSONed CoNLL05-datasets
 PARALLEL="datasets/parallel"                #         parallel corpus
-FAIRDDIR="datasets/preprocessed/conll05"    #         preprocessed data for using fairseq
-
 TRAIN_PREF="${PARALLEL}/train"    # prefix of parallel train set
 DEV_PREF="${PARALLEL}/dev"        #                    dev set
 TEST_PREF="${PARALLEL}/test.wsj"  #                    test set
-
+# ALIGN="datasets/data_align"
 
 ### CoNLL_to_JSON ###
 if [ ! -d ${CoNLL_to_JSON} ] ; then
@@ -42,15 +42,59 @@ else
 fi
 
 
-### fairseq preprocess ###
-if [ ! -d ${FAIRDDIR} ] ; then
-  mkdir -p ${FAIRDDIR}
-  fairseq-preprocess --source-lang src --target-lang tgt \
-      --trainpref ${TRAIN_PREF} \
-      --validpref ${DEV_PREF} \
-      --testpref ${TEST_PREF} \
-      --destdir ${FAIRDDIR}
+### preprocess ###
+if [ ! -f ${DATA_BIN}/hoge ] ; then
+  #mkdir -p ${DATA_BIN}
+  #fairseq-preprocess --source-lang src --target-lang tgt \
+  #  --trainpref ${TRAIN_PREF} \
+  #  --validpref ${DEV_PREF} \
+  #  --testpref ${TEST_PREF} \
+  #  --destdir ${OUT}  #SRL-S2S/conll05
+
+
+  echo "### /fairseq-gec/preprocess.sh ###"
+  python preprocess.py \
+    --source-lang src --target-lang tgt \
+    --padding-factor 1 \
+    --srcdict dicts/dict.src.srl.txt \
+    --joined-dictionary \
+    --copy-ext-dict \
+    --trainpref ${TRAIN_PREF} \
+    --validpref ${DEV_PREF} \
+    --destdir ${DATA_BIN} \
+    --output-format binary \
+    | tee ${OUT}/data_bin.log
+    #--alignfile ${TRAIN_PREF}.src \
+  echo "create log file: ${OUT}/data_bin.log"
+
+  python preprocess.py \
+    --source-lang src --target-lang tgt \
+    --padding-factor 1 \
+    --srcdict dicts/dict.src.srl.txt \
+    --joined-dictionary \
+    --copy-ext-dict \
+    --testpref ${TEST_PREF} \
+    --destdir ${DATA_RAW} \
+    --output-format raw \
+    | tee ${OUT}/data_raw.log
+  echo "create log file: ${OUT}/data_raw.log"
+
+  mv ${DATA_RAW}/test.src-tgt.src ${DATA_RAW}/test.src-tgt.src.old
+
+
+  #echo "### /fairseq-gec/align.sh ###"
+  #mkdir -p ${ALIGN}
+  #python scripts/build_sym_alignment.py \
+  #  --fast_align_dir ~/software/fast_align/build/ \
+  #  --mosesdecoder_dir fakkk \
+  #  --source_file ${TRAIN_PREF}.src \
+  #  --target_file ${TRAIN_PREF}.tgt \
+  #  --output_dir data_align
+
+  #cp ${ALIGN}/align.forward ${TRAIN_PREF}.forward
+  #cp ${ALIGN}/align.backward ${TRAIN_PREF}.backward
+
 else
-  echo "Already Existed: ${FAIRDDIR}"
-  ls ${FAIRDDIR}
+  echo "Already Existed: ${DATA_BIN}"
+  ls ${DATA_BIN}
 fi
