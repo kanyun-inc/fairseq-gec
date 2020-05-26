@@ -27,14 +27,16 @@ from fairseq.meters import AverageMeter, StopwatchMeter
 from fairseq.utils import import_user_module
 from fairseq.models import ema_reverse, ema_restore
 
-from logging import basicConfig, getLogger, NOTSET
+import logging
 logging.basicConfig(
     format='%(asctime)s #%(lineno)s __%(levelname)s__ %(name)s :::  %(message)s',
     datefmt='%Y-%m-%d %H:%M:%S',
-    level=logging.NOTSET,
+    level=logging.DEBUG,
     stream=sys.stdout,
 )
-logger = logging(__name__)
+logger = logging.getLogger(__name__)
+
+sys.setrecursionlimit(2000)
 
 
 def main(args, init_distributed=False):
@@ -49,22 +51,22 @@ def main(args, init_distributed=False):
     torch.manual_seed(args.seed)
 
     # Setup task, e.g., translation, language modeling, etc.
-    logger.notset('Setup task')
+    logger.info('Setup task')
     task = tasks.setup_task(args)
 
     # Load dataset splits
-    logger.notset('Load dataset splits')
+    logger.info('Load dataset splits')
     load_dataset_splits(task, ['train', 'valid'])
 
     # Initialize distributed training (after data loading)
-    logger.notset('Initialize distributed training')
+    logger.info('Initialize distributed training')
     if init_distributed:
         import socket
         args.distributed_rank = distributed_utils.distributed_init(args)
         print('| initialized host {} as rank {}'.format(socket.gethostname(), args.distributed_rank))
 
     # Build model and criterion
-    logger.notset('Build model and criterion')
+    logger.info('Build model and criterion')
     model = task.build_model(args)
     criterion = task.build_criterion(args)
     print(model)
@@ -87,7 +89,7 @@ def main(args, init_distributed=False):
     model.copy_pretrained_params(args)
 
     # Build trainer
-    logger.notset('Build trainer')
+    logger.info('Build trainer')
     trainer = Trainer(args, task, model, criterion, dummy_batch, oom_batch)
     print('| training on {} GPUs'.format(args.distributed_world_size))
     print('| max tokens per GPU = {} and max sentences per GPU = {}'.format(
@@ -96,7 +98,7 @@ def main(args, init_distributed=False):
     ))
 
     # Initialize dataloader
-    logger.notset('Initialize dataloader')
+    logger.info('Initialize dataloader')
     epoch_itr = task.get_batch_iterator(
         dataset=task.dataset(args.train_subset),
         max_tokens=args.max_tokens,
@@ -112,7 +114,7 @@ def main(args, init_distributed=False):
 
     # Load the latest checkpoint if one is available
     if not load_checkpoint(args, trainer, epoch_itr):
-        logger.notset('Load the latest checkpoint')
+        logger.info('Load the latest checkpoint')
         trainer.dummy_train_step([dummy_batch])
 
     # Train until the learning rate gets too small
@@ -126,26 +128,35 @@ def main(args, init_distributed=False):
     valid_subsets = args.valid_subset.split(',')
     while lr > args.min_lr and epoch_itr.epoch < max_epoch and trainer.get_num_updates() < max_update:
         # train for one epoch
+        logger.info('train')
         train(args, trainer, task, epoch_itr)
 
         if epoch_itr.epoch % args.validate_interval == 0:
+            logger.info('validate')
             valid_losses = validate(args, trainer, task, epoch_itr, valid_subsets)
             # ema process
+            logger.info('ema process')
             if not args.no_ema:
                 old_data = ema_restore(trainer.ema, trainer.model)
+                logger.info('validate')
                 valid_losses_ema = validate(args, trainer, task, epoch_itr, valid_subsets)
                 if epoch_itr.epoch % args.save_interval == 0:
+                    logger.info('save checkpoint ... {}'.format(epoch_itr))
                     save_checkpoint(args, trainer, epoch_itr, valid_losses_ema[0], suffix='ema')
                 ema_reverse(trainer.ema, trainer.model, old_data)
 
         # only use first validation loss to update the learning rate
+        logger.info('update lr')
         lr = trainer.lr_step(epoch_itr.epoch, valid_losses[0])
 
         # save checkpoint
         if epoch_itr.epoch % args.save_interval == 0:
+            logger.debug('save checkpoint ... {}'.format(epoch_itr))
             save_checkpoint(args, trainer, epoch_itr, valid_losses[0])
+    
     train_meter.stop()
-    print('| done training in {:.1f} seconds'.format(train_meter.sum))
+    print('| DONE training in {:.1f} seconds'.format(train_meter.sum))
+    logger.info('destdir is ... {}'.format(args.save_dir))
 
 
 def train(args, trainer, task, epoch_itr):
@@ -155,6 +166,7 @@ def train(args, trainer, task, epoch_itr):
             if epoch_itr.epoch <= len(args.update_freq) else args.update_freq[-1]
 
     # Initialize data iterator
+    logger.info('Initialize data iterator')
     itr = epoch_itr.next_epoch_itr(
         fix_batches_to_gpus=args.fix_batches_to_gpus,
         shuffle=(epoch_itr.epoch >= args.curriculum),
@@ -203,6 +215,7 @@ def train(args, trainer, task, epoch_itr):
     progress.print(stats, tag='train', step=stats['num_updates'])
 
     # reset training meters
+    logger.info('reset trainint meters')
     for k in [
         'train_loss', 'train_nll_loss', 'wps', 'ups', 'wpb', 'bsz', 'gnorm', 'clip',
     ]:

@@ -31,8 +31,8 @@ GPU_ID=${GPU_ID}
 
 ARCH=transformer
 SEED=0
-EPOCH=20
-BATCH=16
+EPOCH=2
+BATCH=8
 M_TOKENS=3000
 LOG_INTVL=1000
 PRETRAIN=false
@@ -74,4 +74,3 @@ else
   echo 'invalid MODE'
 
 fi
-

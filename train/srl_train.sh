@@ -1,14 +1,14 @@
-#!/usr/bin/bash -x
+#!/usr/bin/bash
 
-set -x
-
-bash config.sh
+source config.sh
 . /tmp/work.txt
 
 
-if [ ${PRETRAIN} ] ; then
-  CUDA_VISIBLE_DEVICES=${GPU_ID} nohup python train.py $DATA_BIN \
-  --save-dir $MODELS \
+if "${PRETRAIN}" ; then
+  echo "TRAIN w/ pretrained model"
+  CUDA_VISIBLE_DEVICES=${GPU_ID} nohup python train.py ${DATA_BIN} \
+  --source-lang src --target-lang tgt \
+  --save-dir ${MODELS} \
   --seed ${SEED} \
   --max-epoch ${EPOCH} \
   --batch-size ${BATCH} \
@@ -30,10 +30,12 @@ if [ ${PRETRAIN} ] ; then
   --log-interval ${LOG_INTVL} \
   --positive-label-weight ${POS_LBL_W} \
   --pretrained-model ${PRE_MODEL} \
-  --copy-attention --copy-attention-heads ${CP_ATT_HEADS} > $OUT/log$exp.out 2>&1 &
+  --copy-attention --copy-attention-heads ${CP_ATT_HEADS} > ${OUT}/log${exp}.out 2>&1 &
 else
-  CUDA_VISIBLE_DEVICES=${GPU_ID} nohup python train.py $DATA_BIN \
-  --save-dir $MODELS \
+  echo "TRAIN w/o pretrained model"
+  CUDA_VISIBLE_DEVICES=${GPU_ID} nohup python train.py ${DATA_BIN} \
+  --source-lang src --target-lang tgt \
+  --save-dir ${MODELS} \
   --seed ${SEED} \
   --max-epoch ${EPOCH} \
   --batch-size ${BATCH} \
@@ -54,8 +56,8 @@ else
   --no-progress-bar \
   --log-interval ${LOG_INTVL} \
   --positive-label-weight ${POS_LBL_W} \
-  --copy-attention --copy-attention-heads ${CP_ATT_HEADS} > $OUT/log$exp.out 2>&1 &
+  --copy-attention --copy-attention-heads ${CP_ATT_HEADS} > ${OUT}/log${exp}.out 2>&1 &
 fi
 
 
-tail -f $OUT/log$exp.out
+tail -f ${OUT}/log${exp}.out
