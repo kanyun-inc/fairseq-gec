@@ -65,8 +65,24 @@ POS_LBL_W=1.2
 EOS
 
 
+### train ###
 if [ ${MODE} = 'train' ] || [ ${MODE} = 'both' ] ; then 
-  bash train/srl_train.sh
+  bash sh/srl_train.sh
+  cp /tmp/work.txt ${OUT}/experiment.config
+  echo 'FIN TRAIN'
+
+### evaluate ###
+elif [ ${MODE} = 'test' ] || [ ${MODE} = 'both' ] ; then 
+
+  cat <<EOS >> /tmp/work.txt
+BEAM=5
+NBEST=5
+EPOCHS=_last
+M_TOKENS_=6000
+M_LEN_A=0
+EOS
+
+  bash sh/srl_eval.sh
   cp /tmp/work.txt ${OUT}/experiment.config
   echo 'FIN TRAIN'
 
