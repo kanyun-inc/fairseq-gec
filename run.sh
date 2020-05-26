@@ -1,7 +1,5 @@
 #!/usr/bin/bash -eu
 
-set -eux
-
 USAGE="Usage: bash run.sh -g [GPU_ID] -m [MODE]"
 
 while getopts g:m: OPT
@@ -29,13 +27,15 @@ bash config.sh
 
 cat <<EOS > /tmp/work.txt
 
+GPU_ID=${GPU_ID}
+
 ARCH=transformer
 SEED=0
 EPOCH=20
-BATCH=64
+BATCH=16
 M_TOKENS=3000
 LOG_INTVL=1000
-PRETRAIN=False
+PRETRAIN=false
 
 LR=0.001
 LR_SCHEDULER=triangular
@@ -66,7 +66,6 @@ EOS
 
 
 if [ ${MODE} = 'train' ] || [ ${MODE} = 'both' ] ; then 
-  echo 'TRAIN'
   bash train/srl_train.sh
   cp /tmp/work.txt ${OUT}/experiment.config
   echo 'FIN TRAIN'
