@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/usr/bin/bash
 
 device=0
 if [ $# -ge 1 ]; then
