@@ -98,3 +98,7 @@ else
   echo "Already Existed: ${DATA_BIN}"
   ls ${DATA_BIN}
 fi
+
+echo "=== DONE! ==="
+echo "preprocessed against dataset ... ${OUT}"
+echo "next ... run.sh"
