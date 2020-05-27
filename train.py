@@ -250,6 +250,7 @@ def get_training_stats(trainer):
     return stats
 
 
+#TODO ここで SRL の F1 を算出するコードを書く
 def validate(args, trainer, task, epoch_itr, subsets):
     """Evaluate the model on the validation set(s) and return the losses."""
     valid_losses = []
@@ -283,6 +284,7 @@ def validate(args, trainer, task, epoch_itr, subsets):
                 meter.reset()
         extra_meters = collections.defaultdict(lambda: AverageMeter())
 
+        #TODO ここで計算する
         for sample in progress:
             log_output = trainer.valid_step(sample)
 

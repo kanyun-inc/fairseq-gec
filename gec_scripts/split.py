@@ -37,7 +37,18 @@ def split(filename, out_filename, index_filename):
         for sl in out_lines:
             ofile.write(sl + '\n')
 
-filename = sys.argv[1]
-ofilename = sys.argv[2]
-idx_filename = sys.argv[3]
-split(filename, ofilename, idx_filename)
+
+if __name__ == '__main__':
+    """ running example
+    # preprocess/create_preprocess_data.sh
+    % mv ${DATA_RAW}/test.src-tgt.src ${DATA_RAW}/test.src-tgt.src.old
+    % python gec_scripts/split.py \
+        ${DATA_RAW}/test.src-tgt.src.old \
+        ${DATA_RAW}/test.src-tgt.src \
+        ${DATA_RAW}/test.idx
+    """
+    
+    filename = sys.argv[1]
+    ofilename = sys.argv[2]
+    idx_filename = sys.argv[3]
+    split(filename, ofilename, idx_filename)
