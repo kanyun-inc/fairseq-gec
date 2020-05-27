@@ -31,11 +31,12 @@ GPU_ID=${GPU_ID}
 
 ARCH=transformer
 SEED=0
-EPOCH=2
+EPOCH=9
 BATCH=8
 M_TOKENS=3000
 LOG_INTVL=1000
-PRETRAIN=false
+PRETRAIN=true
+PRE_MODEL=srl/models_pretrain/checkpoint_last.pt
 
 LR=0.001
 LR_SCHEDULER=triangular
@@ -83,8 +84,7 @@ M_LEN_A=0
 EOS
 
   bash sh/srl_eval.sh
-  cp /tmp/work.txt ${OUT}/experiment.config
-  echo 'FIN TRAIN'
+  echo 'FIN TEST'
 
 else
   echo 'invalid MODE'

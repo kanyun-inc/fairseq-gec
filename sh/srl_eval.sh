@@ -12,7 +12,7 @@ rm -rf ${DATA_RAW}/test.src-tgt.src
 rm -rf ${DATA_RAW}/test.src-tgt.tgt
 
 
-### gec_scripts/split.py ###
+echo "### gec_scripts/split.py ###"
 python gec_scripts/split.py \
   ${DATA_RAW}/test.src-tgt.src.old \
   ${DATA_RAW}/test.src-tgt.src \
@@ -20,7 +20,7 @@ python gec_scripts/split.py \
 
 cp ${DATA_RAW}/test.src-tgt.src ${DATA_RAW}/test.src-tgt.tgt
 
-### generate.py ###
+echo "### generate.py ###"
 EPOCHS=${EPOCHS}
 for EPOCH in ${EPOCHS[*]}; do
     if [ -f ${RESULT}/m2score${EMA}${exp}_${EPOCH}.log ]; then
@@ -29,13 +29,12 @@ for EPOCH in ${EPOCHS[*]}; do
     fi
     echo ${EPOCH}
 
-    CUDA_VISIBLE_DEVICES=${GPU_ID} python generate.py $DATA_RAW \
+    CUDA_VISIBLE_DEVICES=${GPU_ID} python generate.py ${DATA_RAW} \
     --path ${MODELS}/checkpoint${EMA}${EPOCH}.pt \
     --beam ${BEAM} \
     --nbest ${NBEST} \
     --gen-subset test \
     --max-tokens ${M_TOKENS_} \
-    --no-progress-bar \
     --raw-text \
     --batch-size ${BATCH} \
     --print-alignment \
@@ -46,7 +45,7 @@ for EPOCH in ${EPOCHS[*]}; do
 
     cat ${RESULT}/output${EMA}${EPOCH}.nbest.txt | grep "^H" | python ./gec_scripts/sort.py 12 ${RESULT}/output${EMA}${EPOCH}.txt.split
 
-    ## gec_scripts/revert_split.py ##
+    echo "## gec_scripts/revert_split.py ##"
     python ./gec_scripts/revert_split.py ${RESULT}/output${EMA}${EPOCH}.txt.split $DATA_RAW/test.idx > ${RESULT}/output${EMA}${EPOCH}.txt
 
     python2 ./gec_scripts/m2scorer/m2scorer -v ${RESULT}/output${EMA}${EPOCH}.txt ./data/test.m2 > ${RESULT}/m2score${EMA}${exp}_${EPOCH}.log

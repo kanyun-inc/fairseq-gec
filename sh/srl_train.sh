@@ -26,7 +26,6 @@ if "${PRETRAIN}" ; then
   --encoder-attention-heads ${ENC_ATT_HEADS} --decoder-attention-heads ${DEC_ATT_HEADS} \
   --copy-attention-heads ${CP_ATT_HEADS} \
   --share-all-embeddings \
-  --no-progress-bar \
   --log-interval ${LOG_INTVL} \
   --positive-label-weight ${POS_LBL_W} \
   --pretrained-model ${PRE_MODEL} \
@@ -53,7 +52,6 @@ else
   --encoder-attention-heads ${ENC_ATT_HEADS} --decoder-attention-heads ${DEC_ATT_HEADS} \
   --copy-attention-heads ${CP_ATT_HEADS} \
   --share-all-embeddings \
-  --no-progress-bar \
   --log-interval ${LOG_INTVL} \
   --positive-label-weight ${POS_LBL_W} \
   --copy-attention --copy-attention-heads ${CP_ATT_HEADS} > ${OUT}/log${exp}.out 2>&1 &
