@@ -10,6 +10,8 @@ TRAIN_PREF="${PARALLEL}/train"    # prefix of parallel train set
 DEV_PREF="${PARALLEL}/dev"        #                    dev set
 TEST_PREF="${PARALLEL}/test.wsj"  #                    test set
 # ALIGN="datasets/data_align"
+SMALL_RATE=5
+SMALL="datasets/small"
 
 ### CoNLL_to_JSON ###
 if [ ! -d ${CoNLL_to_JSON} ] ; then
@@ -41,15 +43,24 @@ else
   ls ${PARALLEL}
 fi
 
+### small set for develop ###
+if [ ${OUT} = 'small' ] ; then
+  DSETS=`ls ${PARALLEL} --ignore='small_*'`
+  for DSET in ${DSETS[@]}
+  do
+    DSET=${PARALLEL}/${DSET}
+    WC=`wc -l ${DSET} | awk '{print $1}'`
+    DEST=${PARALLEL}/small_${DSET##*/}
+    NUM=$((${WC}*${SMALL_RATE}/100))
+    head -${NUM} ${DSET} > ${DEST}
+  done
+  TRAIN_PREF="${PARALLEL}/small_train"    # prefix of parallel train set
+  DEV_PREF="${PARALLEL}/small_dev"        #                    dev set
+  TEST_PREF="${PARALLEL}/small_test.wsj"  #                    test set
+fi
 
 ### preprocess ###
 if [ ! -f ${DATA_RAW}/test.src-tgt.src.old ] ; then
-  #mkdir -p ${DATA_BIN}
-  #fairseq-preprocess --source-lang src --target-lang tgt \
-  #  --trainpref ${TRAIN_PREF} \
-  #  --validpref ${DEV_PREF} \
-  #  --testpref ${TEST_PREF} \
-  #  --destdir ${OUT}  #SRL-S2S/conll05
 
   cp datasets/preprocessed/conll05/dict* dicts/
   rm -rf ${DATA_BIN} ${DATA_RAW}
