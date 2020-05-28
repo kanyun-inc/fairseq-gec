@@ -43,7 +43,7 @@ fi
 
 
 ### preprocess ###
-if [ ! -f ${DATA_BIN}/hoge ] ; then
+if [ ! -f ${DATA_RAW}/test.src-tgt.src.old ] ; then
   #mkdir -p ${DATA_BIN}
   #fairseq-preprocess --source-lang src --target-lang tgt \
   #  --trainpref ${TRAIN_PREF} \
@@ -52,7 +52,7 @@ if [ ! -f ${DATA_BIN}/hoge ] ; then
   #  --destdir ${OUT}  #SRL-S2S/conll05
 
   cp datasets/preprocessed/conll05/dict* dicts/
-  rm -f ${DATA_BIN}/dict
+  rm -rf ${DATA_BIN} ${DATA_RAW}
 
   echo "### /fairseq-gec/preprocess.sh ###"
   python preprocess.py \
@@ -72,7 +72,7 @@ if [ ! -f ${DATA_BIN}/hoge ] ; then
   python preprocess.py \
     --source-lang src --target-lang tgt \
     --padding-factor 1 \
-    --srcdict dicts/dict.src.srl.txt \
+    --srcdict dicts/dict.src.txt \
     --joined-dictionary \
     --copy-ext-dict \
     --testpref ${TEST_PREF} \
@@ -101,6 +101,7 @@ else
   ls ${DATA_BIN}
 fi
 
+echo ""
 echo "=== DONE! ==="
 echo "preprocessed against dataset ... ${OUT}/"
 echo "next ..."
