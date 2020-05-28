@@ -51,12 +51,14 @@ if [ ! -f ${DATA_BIN}/hoge ] ; then
   #  --testpref ${TEST_PREF} \
   #  --destdir ${OUT}  #SRL-S2S/conll05
 
+  cp datasets/preprocessed/conll05/dict* dicts/
+  rm -f ${DATA_BIN}/dict
 
   echo "### /fairseq-gec/preprocess.sh ###"
   python preprocess.py \
     --source-lang src --target-lang tgt \
+    --srcdict dicts/dict.src.txt \
     --padding-factor 1 \
-    --srcdict dicts/dict.src.srl.txt \
     --joined-dictionary \
     --copy-ext-dict \
     --trainpref ${TRAIN_PREF} \
