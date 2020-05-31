@@ -31,6 +31,36 @@ def create_parallel_corpus(
     'tgt_lang':     '<EN-SRL>'
     }
     """
+    ### ここで target を作成 ###
+    def insert_pred_token(seq_tag_tokens:list) -> list:
+        # return ' '.join(line['seq_tag_tokens']) を変更
+        try:
+            pix = seq_tag_tokens.index('<PRED>')
+            seq_tag_tokens.insert(pix+2, '</PRED>')
+        except ValueError:
+            pix = -1
+        return seq_tag_tokens
+
+    def convert_label_tokens(seq_tag_tokens:list) -> list:
+        out = []
+        label = None
+        for rvs_token in seq_tag_tokens[::-1]:
+            if rvs_token.endswith(')') and len(rvs_token) > 1:
+                if label is not None:
+                    raise LabelUnclosedError
+                label = rvs_token[:-1]
+                out.append(f"</{label}>")
+            elif rvs_token.startswith('(#'):
+                if label is None:
+                    raise LabelUnclosedError
+                out.append(f"<{label}>")
+                label = None
+            else:
+                out.append(rvs_token)
+
+        return out[::-1]
+
+
     pattern = re.compile('.*?/conll05.(?P<dset>.*?).json')
     name = pattern.search(str(fi)).group('dset')
 
@@ -41,8 +71,8 @@ def create_parallel_corpus(
 
     for idx, line in enumerate(open(fi), start=1):
         line = json.loads(line.rstrip())
-        src = '<SRL> ' + ' '.join(line['seq_marked'])
-        tgt = ' '.join(line['seq_tag_tokens'])
+        src = '<EN-SRL> ' + ' '.join(insert_pred_token(line['seq_marked']))
+        tgt = '<DE-SRL> ' + ' '.join(convert_label_tokens(insert_pred_token(line['seq_tag_tokens'])))
         
         fo_src.write(src + '\n')
         fo_tgt.write(tgt + '\n')

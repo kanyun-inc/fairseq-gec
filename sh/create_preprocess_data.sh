@@ -2,7 +2,7 @@
 source config.sh
 
 bash config.sh
-SRC="preprocess/src"
+SRC="sh/src"
 CoNLL="datasets/conll05"                    # path of downloaded CoNLL-datasets
 CoNLL_to_JSON="datasets/json"               #         JSONed CoNLL05-datasets
 PARALLEL="datasets/parallel"                #         parallel corpus
