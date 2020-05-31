@@ -10,8 +10,12 @@ if [ $# -ge 2 ]; then
     exp=$2
 fi
 
+exp='_small'
+OUT='small' # output dir
 DATA='datasets/preprocessed/conll05' # input dir
-OUT='srl' # output dir
+
+#exp=''
+#OUT=srl
 
 DATA_BIN=$OUT/data_bin
 DATA_RAW=$OUT/data_raw
