@@ -32,7 +32,7 @@ if "${PRETRAIN}" ; then
   --copy-attention --copy-attention-heads ${CP_ATT_HEADS} > ${OUT}/log${exp}.out 2>&1 &
 else
   echo "TRAIN w/o pretrained model"
-  CUDA_VISIBLE_DEVICES=${GPU_ID} nohup python train.py ${DATA_BIN} \
+  CUDA_VISIBLE_DEVICES=${GPU_ID} python train.py ${DATA_BIN} \
   --source-lang src --target-lang tgt \
   --save-dir ${MODELS} \
   --seed ${SEED} \
@@ -54,7 +54,7 @@ else
   --share-all-embeddings \
   --log-interval ${LOG_INTVL} \
   --positive-label-weight ${POS_LBL_W} \
-  --copy-attention --copy-attention-heads ${CP_ATT_HEADS} > ${OUT}/log${exp}.out 2>&1 &
+  --copy-attention --copy-attention-heads ${CP_ATT_HEADS} #> ${OUT}/log${exp}.out 2>&1 &
 fi
 
 
