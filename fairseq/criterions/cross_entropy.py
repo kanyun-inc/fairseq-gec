@@ -18,6 +18,7 @@ class CrossEntropyCriterion(FairseqCriterion):
 
     def __init__(self, args, task):
         super().__init__(args, task)
+        self.task = task
 
     def forward(self, model, sample, reduce=True):
         """Compute the loss for the given sample.
@@ -27,7 +28,7 @@ class CrossEntropyCriterion(FairseqCriterion):
         2) the sample size, which is used as the denominator for the gradient
         3) logging outputs to display while training
         """
-        net_output = model(**sample['net_input']) 
+        net_output = model(**sample['net_input'])
         """
         # net_input: the input to the Model, containing keys
         - `src_tokens` (LongTensor): 
