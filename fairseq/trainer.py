@@ -343,6 +343,15 @@ class Trainer(object):
             sample_size = [sample_size]
 
         # aggregate logging outputs and sample sizes
+        """
+        logging_output = {
+            loss: 3.01,
+            ntokens: 63,
+            nsentences: 8,
+            sample_size: 63,
+            copy_alpha: 0.39
+        }
+        """
         logging_output = self.task.aggregate_logging_outputs(
             logging_output, self.criterion
         )
