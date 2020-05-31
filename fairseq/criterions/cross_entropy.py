@@ -27,7 +27,28 @@ class CrossEntropyCriterion(FairseqCriterion):
         2) the sample size, which is used as the denominator for the gradient
         3) logging outputs to display while training
         """
-        net_output = model(**sample['net_input'])
+        net_output = model(**sample['net_input']) 
+        """
+        # net_input: the input to the Model, containing keys
+        - `src_tokens` (LongTensor): 
+            a padded 2D Tensor of tokens in the source sentence of shape `(bsz, src_len)`. 
+            Padding will appear on the left if *left_pad_source* is ``True``.
+        - `src_lengths` (LongTensor): 
+            1D Tensor of the unpadded lengths of each source sentence of shape `(bsz)`
+        - `prev_output_tokens` (LongTensor): 
+            a padded 2D Tensor of tokens in the target sentence, shifted right by one position for teacher forcing, of shape `(bsz, tgt_len)`.
+            This key will not be present if *input_feeding* is ``False``. 
+            Padding will appear on the left if *left_pad_target* is ``True``.
+
+        # net_output: len() = 2
+        - net_output[0].size = torch.Size([23, 128, 44400])
+        - net_output[1]:
+            - attn
+            - inner_states
+            - copy_attn
+            - copy_alpha
+            - src_tokens
+        """
         loss, _ = self.compute_loss(model, net_output, sample, reduce=reduce)
         sample_size = sample['target'].size(0) if self.args.sentence_avg else sample['ntokens']
         copy_alpha = net_output[1]['copy_alpha'].mean().item() if net_output[1]['copy_alpha'] is not None else -1
