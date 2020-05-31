@@ -20,6 +20,15 @@ elif test "${MODE}" != "TRUE"; then
   exit 1
 fi
 
+if [ ${MODE} = 'train' ] ; then
+  echo -en "use pretrain --- [y?] "
+  read PRETRAIN
+  if [ ${PRETRAIN} = 'y' ] ; then
+    PRETRAIN=true
+  else
+    PRETRAIN=false
+  fi
+fi
 
 # run ==============================================
 
@@ -35,7 +44,7 @@ EPOCH=9
 BATCH=8
 M_TOKENS=3000
 LOG_INTVL=1000
-PRETRAIN=true
+PRETRAIN=${PRETRAIN}
 PRE_MODEL=srl/models_pretrain/checkpoint_last.pt
 
 LR=0.001
@@ -86,7 +95,7 @@ EOS
   bash sh/srl_eval.sh
   echo 'FIN TEST'
 
-else
+elif [ ! ${MODE} = 'train' ] ; then
   echo 'invalid MODE'
 
 fi
