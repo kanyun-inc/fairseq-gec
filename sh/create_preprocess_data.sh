@@ -62,13 +62,11 @@ fi
 ### preprocess ###
 if [ ! -f ${DATA_RAW}/test.src-tgt.src.old ] ; then
 
-  cp datasets/preprocessed/conll05/dict* dicts/
   rm -rf ${DATA_BIN} ${DATA_RAW}
 
   echo "### /fairseq-gec/preprocess.sh ###"
   python preprocess.py \
     --source-lang src --target-lang tgt \
-    --srcdict dicts/dict.src.txt \
     --padding-factor 1 \
     --joined-dictionary \
     --copy-ext-dict \
@@ -77,13 +75,14 @@ if [ ! -f ${DATA_RAW}/test.src-tgt.src.old ] ; then
     --destdir ${DATA_BIN} \
     --output-format binary \
     | tee ${OUT}/data_bin.log
+    #--srcdict dicts/dict.src.txt \
     #--alignfile ${TRAIN_PREF}.src \
   echo "create log file: ${OUT}/data_bin.log"
 
   python preprocess.py \
     --source-lang src --target-lang tgt \
     --padding-factor 1 \
-    --srcdict dicts/dict.src.txt \
+    --srcdict ${DATA_BIN}/dict.src.txt \
     --joined-dictionary \
     --copy-ext-dict \
     --testpref ${TEST_PREF} \
