@@ -1,4 +1,4 @@
-#!/usr/bin/env python3 -u
+""" #!/usr/bin/env python3 -u """
 # Copyright (c) 2017-present, Facebook, Inc.
 # All rights reserved.
 #
@@ -17,6 +17,7 @@ import math
 import random
 import subprocess
 import time
+import numpy as np
 
 import torch
 
@@ -126,15 +127,23 @@ def main(args, init_distributed=False):
     train_meter.start()
     valid_losses = [None]
     valid_subsets = args.valid_subset.split(',')
+    logger.debug("lr ... %lf" % lr)
+    logger.debug("min_lr ... %lf" % args.min_lr)
+    logger.debug("epoch_itr.epoch ... %d" % epoch_itr.epoch)
+    logger.debug("max_epoch ... %d" % max_epoch)
     while lr > args.min_lr and epoch_itr.epoch < max_epoch and trainer.get_num_updates() < max_update:
+        
         # train for one epoch
-        logger.info('train')
+        logger.info('===== train =====')
         train(args, trainer, task, epoch_itr)
 
         if epoch_itr.epoch % args.validate_interval == 0:
-            logger.info('validate')
+            logger.info('===== validate =====')
             valid_losses = validate(args, trainer, task, epoch_itr, valid_subsets)
-            # ema process
+            logger.info("epoch_itr.epoch ... %d" % epoch_itr.epoch)
+            logger.debug("valid_losses ... ".format(valid_losses[0]))
+
+            # ema process (直近の比重を大きく?)
             logger.info('ema process')
             if not args.no_ema:
                 old_data = ema_restore(trainer.ema, trainer.model)
@@ -157,6 +166,7 @@ def main(args, init_distributed=False):
     train_meter.stop()
     print('| DONE training in {:.1f} seconds'.format(train_meter.sum))
     logger.info('destdir is ... {}'.format(args.save_dir))
+    sys.exit()
 
 
 def train(args, trainer, task, epoch_itr):
@@ -177,9 +187,23 @@ def train(args, trainer, task, epoch_itr):
     )
 
     extra_meters = collections.defaultdict(lambda: AverageMeter())
-    first_valid = args.valid_subset.split(',')[0]
-    max_update = args.max_update or math.inf
+    first_valid = args.valid_subset.split(',')[0]   # 'valid'
+    max_update = args.max_update or math.inf        # inf
     for i, samples in enumerate(progress, start=epoch_itr.iterations_in_epoch):
+        """ samples: List[Dict] (sizeof 1)
+        - id: tensor([48])
+        - nsentences: 1
+        - ntokens: 43
+        - net_input: {}
+            - src_tokens: tensor([1, 39])
+            - src_lengths: tensor([39])
+            - prev_output_tokens: tensor([1, 43])
+        - target: tensor([1, 43])
+        - source_label: None
+        - target_label: None
+        """
+
+        ### original ###
         log_output = trainer.train_step(samples)
         if log_output is None:
             continue
@@ -254,7 +278,7 @@ def get_training_stats(trainer):
 def validate(args, trainer, task, epoch_itr, subsets):
     """Evaluate the model on the validation set(s) and return the losses."""
     valid_losses = []
-    for subset in subsets:
+    for subset in subsets: # subset == 'valid'
         # Initialize data iterator
         itr = task.get_batch_iterator(
             dataset=task.dataset(subset),
@@ -286,7 +310,28 @@ def validate(args, trainer, task, epoch_itr, subsets):
 
         #TODO ここで計算する
         for sample in progress:
-            log_output = trainer.valid_step(sample)
+            """
+            sample.keys()
+            * id            ::: tensor([126, 127, 121, 62, 103, 66, 63, 57])
+            * nsentences    ::: 8
+            * ntokens       ::: 63
+            * net_input     ::: dict_keys(['src_tokens, src_length, prev_output_tokens'])
+            * target        ::: torch.Size([8, 18])
+            * source_label  ::: None
+            * target_label  ::: None
+            """
+            ### develop ###
+            gold, pred = trainer.eval_step(sample)
+            pred = torch.argmax(pred, -1).cpu()
+            gold = gold.cpu()
+            pred_tokens = np.array(list(dict_itos(task.tgt_dict, pred))).reshape(args.max_sentences, -1).tolist()
+            gold_tokens = np.array(list(dict_itos(task.tgt_dict, gold))).reshape(args.max_sentences, -1).tolist()
+            assert len(pred_tokens) == args.max_sentences
+            assert len(gold_tokens) == args.max_sentences
+            import ipdb; ipdb.set_trace()
+
+            ### original ###
+            log_output = trainer.valid_step(sample) # trainer.valid_step 内で srl score を計算？
 
             for k, v in log_output.items():
                 if k in ['loss', 'nll_loss', 'ntokens', 'nsentences', 'sample_size']:
@@ -302,6 +347,8 @@ def validate(args, trainer, task, epoch_itr, subsets):
         valid_losses.append(stats['loss'].avg)
     return valid_losses
 
+def dict_itos(dict, indices):
+    return map(lambda x: dict[int(x)], indices)
 
 def get_valid_stats(trainer):
     stats = collections.OrderedDict()
