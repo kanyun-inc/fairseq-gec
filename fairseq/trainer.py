@@ -367,6 +367,55 @@ class Trainer(object):
 
         return logging_output
 
+
+    ### 拡張部分: SRL における F1値 を計算する ###
+    def eval_step(self, sample, raise_oom=False):
+        """Do forward pass in evaluation mode."""
+        
+        def get_output(sample, model, criterion, reduce=True):
+            model.eval()
+            with torch.no_grad():
+                net_output = model(**sample['net_input'])
+                """ net_output: Tuple
+                ### net_output[0] ... torch([8, 19, 8536])
+                ### net_output[1] ... Dict {attn:Tensor([8, 19, 13]), inner_states:List[Tensor], copy_attn:Tensor([8, 19, 13]), copy_alpha:Tensor([8, 19, 1]), src_tokens:Tensor([8, 13])}
+                """
+                lprobs = model.get_normalized_probs(net_output, log_probs=True, sample=sample)
+                lprobs = lprobs.view(-1, lprobs.size(-1))
+                gold = model.get_targets(sample, net_output).view(-1)
+                # loss = F.nll_loss(lprobs, target, size_average=False, ignore_index=self.padding_idx, reduce=reduce)
+                return gold, lprobs
+
+        with torch.no_grad():
+            self.model.eval()
+            self.criterion.eval()
+
+            sample = self._prepare_sample(sample)
+            if sample is None:
+                sample = self._prepare_sample(self._dummy_batch)
+                ignore_results = True
+            else:
+                ignore_results = False
+
+            try:
+                gold, pred = get_output(sample, self.model, self.criterion)
+
+            except RuntimeError as e:
+                if 'out of memory' in str(e) and not raise_oom:
+                    print('| WARNING: ran out of memory, retrying batch')
+                    for p in self.model.parameters():
+                        if p.grad is not None:
+                            del p.grad  # free some memory
+                    if self.cuda:
+                        torch.cuda.empty_cache()
+                    return self.eval_step(sample, raise_oom=True)
+                else:
+                    raise e
+        
+        # write to /tmp/pred.prop, /tmp/gold.prop
+        return gold, pred
+
+
     def dummy_train_step(self, dummy_batch):
         """Dummy training step for warming caching allocator."""
         self.train_step(dummy_batch, dummy_batch=True)
