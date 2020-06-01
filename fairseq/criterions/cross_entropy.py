@@ -63,13 +63,14 @@ class CrossEntropyCriterion(FairseqCriterion):
         return loss, sample_size, logging_output
 
     def compute_loss(self, model, net_output, sample, reduce=True):
-        
         if self.args.positive_label_weight != 1 \
             and sample is not None and sample.get('target_label', None) is not None:
             return self.compute_weighted_loss(model, net_output, sample, reduce=True)
         lprobs = model.get_normalized_probs(net_output, log_probs=True, sample=sample)
+        # get_normalized_probs: softmax (normalization)
         lprobs = lprobs.view(-1, lprobs.size(-1))
         target = model.get_targets(sample, net_output).view(-1)
+        # get_targets: return sample['target'] ... torch([23, 128])
         loss = F.nll_loss(lprobs, target, size_average=False, ignore_index=self.padding_idx,
                           reduce=reduce)
         return loss, loss
