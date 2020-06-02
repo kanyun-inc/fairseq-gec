@@ -18,6 +18,7 @@ import random
 import subprocess
 import time
 import numpy as np
+import pandas as pd
 
 import torch
 
@@ -28,9 +29,11 @@ from fairseq.meters import AverageMeter, StopwatchMeter
 from fairseq.utils import import_user_module
 from fairseq.models import ema_reverse, ema_restore
 
+from allennlp.models.semantic_role_labeler import convert_bio_tags_to_conll_format
+
 import logging
 logging.basicConfig(
-    format='%(asctime)s #%(lineno)s __%(levelname)s__ %(name)s :::  %(message)s',
+    format='%(asctime)s #%(lineno)s %(levelname)s %(name)s :::  %(message)s',
     datefmt='%Y-%m-%d %H:%M:%S',
     level=logging.DEBUG,
     stream=sys.stdout,
@@ -203,7 +206,6 @@ def train(args, trainer, task, epoch_itr):
         - target_label: None
         """
 
-        ### original ###
         log_output = trainer.train_step(samples)
         if log_output is None:
             continue
@@ -274,7 +276,6 @@ def get_training_stats(trainer):
     return stats
 
 
-#TODO ここで SRL の F1 を算出するコードを書く
 def validate(args, trainer, task, epoch_itr, subsets):
     """Evaluate the model on the validation set(s) and return the losses."""
     valid_losses = []
@@ -309,6 +310,10 @@ def validate(args, trainer, task, epoch_itr, subsets):
         extra_meters = collections.defaultdict(lambda: AverageMeter())
 
         #TODO ここで計算する
+        fo_gold, fo_pred = open('work/gold.prop', 'a'), open('work/pred.prop', 'a')
+        logger.info('open gold prop ... {}'.format(fo_gold))
+        logger.info('open pred prop ... {}'.format(fo_pred))
+
         for sample in progress:
             """
             sample.keys()
@@ -321,14 +326,17 @@ def validate(args, trainer, task, epoch_itr, subsets):
             * target_label  ::: None
             """
             ### develop ###
+            nsents = sample['nsentences']
             gold, pred = trainer.eval_step(sample)
-            pred = torch.argmax(pred, -1).cpu()
             gold = gold.cpu()
-            pred_tokens = np.array(list(dict_itos(task.tgt_dict, pred))).reshape(args.max_sentences, -1).tolist()
-            gold_tokens = np.array(list(dict_itos(task.tgt_dict, gold))).reshape(args.max_sentences, -1).tolist()
-            assert len(pred_tokens) == args.max_sentences
-            assert len(gold_tokens) == args.max_sentences
-            import ipdb; ipdb.set_trace()
+            pred = torch.argmax(pred, -1).cpu()
+            gold_tokens = np.array(list(dict_itos(task.tgt_dict, gold))).reshape(nsents, -1).tolist()
+            pred_tokens = np.array(list(dict_itos(task.tgt_dict, pred))).reshape(nsents, -1).tolist()
+            assert len(gold_tokens) == nsents
+            assert len(pred_tokens) == nsents
+            wrap_write_prop(fo_gold, gold_tokens, gold_tokens)
+            wrap_write_prop(fo_pred, pred_tokens, gold_tokens)
+
 
             ### original ###
             log_output = trainer.valid_step(sample) # trainer.valid_step 内で srl score を計算？
@@ -337,6 +345,26 @@ def validate(args, trainer, task, epoch_itr, subsets):
                 if k in ['loss', 'nll_loss', 'ntokens', 'nsentences', 'sample_size']:
                     continue
                 extra_meters[k].update(v)
+        
+        fo_gold.close(), fo_pred.close()
+        ### srl-eval.pl ###
+        path_pl = os.path.abspath('/home/miyawaki_shumpei/soft/srlconll-1.1/bin/srl-eval.pl')
+        path_gldp = os.path.abspath(fo_gold.name)
+        path_prdp = os.path.abspath(fo_pred.name)
+        command = f"perl {path_pl} {path_gldp} {path_prdp}"
+        process = subprocess.run(command.split(), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        result = process.stdout.decode("utf8")
+        result = [o.split() for o in result.split('\n') if len(o.split()) > 1]
+        statistics, scores = result[:3], result[3:]
+        column, *scores = scores
+        column.insert(0, 'label')
+        overall = ( 
+            pd.DataFrame(scores, columns=column)
+            .set_index('label')
+            .loc['Overall']
+        )
+        
+        logger.debug('overall scores ::: {}' % overall)
 
         # log validation stats
         stats = get_valid_stats(trainer)
@@ -347,8 +375,119 @@ def validate(args, trainer, task, epoch_itr, subsets):
         valid_losses.append(stats['loss'].avg)
     return valid_losses
 
+
+# decorator
+def develop(tag):
+    def _develop(func):
+        def wrapper(*args, **kwargs):
+            logger.info('{} ... {}'.format(tag, func))
+            func(*args, **kwargs)
+        return wrapper
+    return _develop
+
+
 def dict_itos(dict, indices):
     return map(lambda x: dict[int(x)], indices)
+
+def is_start(t, excepts=('<unk>', '<pad>', '<EN-SRL>', '<DE-SRL>', '</s>')):
+    return t.startswith('<') and t.endswith('>') and not t.startswith('</') and (t not in excepts)
+
+def is_end(t, excepts=('<unk>', '<pad>', '<EN-SRL>', '<DE-SRL>', '</s>')):
+    return t.startswith('</') and t.endswith('>') and (t not in excepts)
+
+def extract_index(tokens: list, query='<V>', pos=1):
+    index = pos+tokens.index(query) if query in tokens else -1
+    return index if (index+1 <= len(tokens)) and (index != -1) else -1
+
+def is_closed(tokens: list):
+    isInvalid = 0
+    for token in tokens:
+        if isInvalid < 0 or 1 < isInvalid: return False
+        if is_start(token): isInvalid += 1
+        elif is_end(token): isInvalid -= 1
+    return True
+
+#@develop('dev.1 convert into bio')
+def to_bio(tokens: list, init_label='O', excepts=('<pad>', '<EN-SRL>', '<DE-SRL>', '</s>')) -> list:
+    # is_close(tokens)
+    is_B, bios, label = False, [], init_label
+    for token in tokens:
+        if is_start(token):
+            is_B, label = True, token[1:-1]
+        elif is_end(token): 
+            is_B, label = False, init_label
+            continue
+        elif label == init_label: # O
+            bios.append(label)
+        elif token in excepts:
+            continue
+        else: # token==label -> BIを付与
+            if is_B:
+                bios.append(f"B-{label}")
+                is_B = False
+            else:
+                bios.append(f"I-{label}")
+    return bios
+
+#@develop('dev.2 convert into prop')
+def to_prop(bios:list):
+    #assert bios is not None
+    return convert_bio_tags_to_conll_format(bios)
+
+# dev なので，同一文でも新しく 2cols を作成
+#@develop('dev.3 write prop')
+def write_prop(fo, tokens:list, golds:list, oracle='min'):
+    assert oracle in ('min', 'max'), "OracleError"
+    gold_props = to_prop(to_bio(golds))
+    verb_idx = extract_index(golds, query='<V>', pos=1)
+    col_0 = ['-' for _ in gold_props]
+    col_1 = []
+
+    if verb_idx == -1:
+        # 述語なし
+        col_1 = []
+    else:
+        def extract_index_for_cols(golds, target='<V>'):
+            count = 0
+            for token in golds:
+                if (not is_start(token)) and (not is_end(token)): count+=1
+                if token == target: return count
+        verb = golds[verb_idx]
+        col_vix = extract_index_for_cols(golds)
+        try:
+            col_0[col_vix] = verb
+        except IndexError:
+            import ipdb; ipdb.set_trace()
+        if len(tokens) != len(golds):
+            # len 不一致
+            import ipdb; ipdb.set_trace()
+            col_1 = ['*' if oracle=='min' else gold for gold in gold_props]
+        elif is_closed(tokens):
+            # unclosed (不適切 bracket)
+            col_1 = ['*' if oracle=='min' else gold for gold in gold_props]
+        else:
+            # 問題なし
+            col_1 = to_prop(to_bio(tokens))
+            if len(col_0) != len(col_1):
+                # len 不一致
+                col_1 = ['*' if oracle=='min' else gold for gold in gold_props]
+    
+    try:
+        assert (len(col_0)==len(col_1)) or (set(col_0) == {'-'})
+    except:
+        import ipdb; ipdb.set_trace()
+    for c0, c1 in itertools.zip_longest(col_0, col_1):
+        print(f"{c0}\t{c1}", file=fo, end='\n')
+    print("\n", file=fo)
+
+
+def wrap_write_prop(fo, sents:list, golds:list):
+    # write_prop 関数は一文専用なので，複数文で loop
+    for sent, gold in zip(sents, golds):
+        sent = [token for token in sent if token!='<pad>']
+        gold = [token for token in gold if token!='<pad>']
+        write_prop(fo, sent, gold, oracle='min')
+
 
 def get_valid_stats(trainer):
     stats = collections.OrderedDict()
