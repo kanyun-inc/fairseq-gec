@@ -10,7 +10,7 @@ TRAIN_PREF="${PARALLEL}/train"    # prefix of parallel train set
 DEV_PREF="${PARALLEL}/dev"        #                    dev set
 TEST_PREF="${PARALLEL}/test.wsj"  #                    test set
 # ALIGN="datasets/data_align"
-SMALL_RATE=5
+SMALL_RATE=10
 SMALL="datasets/small"
 
 ### CoNLL_to_JSON ###

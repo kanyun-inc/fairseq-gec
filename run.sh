@@ -40,12 +40,12 @@ GPU_ID=${GPU_ID}
 
 ARCH=transformer
 SEED=0
-EPOCH=12
+EPOCH=30
 BATCH=8
 M_TOKENS=3000
 LOG_INTVL=1000
 PRETRAIN=${PRETRAIN}
-PRE_MODEL=srl/models_pretrain/checkpoint_last.pt
+PRE_MODEL=srl/models/checkpoint_last.pt
 
 LR=0.001
 LR_SCHEDULER=triangular
