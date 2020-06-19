@@ -18,6 +18,7 @@ class CrossEntropyCriterion(FairseqCriterion):
 
     def __init__(self, args, task):
         super().__init__(args, task)
+        self.task = task
 
     def forward(self, model, sample, reduce=True):
         """Compute the loss for the given sample.
@@ -28,6 +29,27 @@ class CrossEntropyCriterion(FairseqCriterion):
         3) logging outputs to display while training
         """
         net_output = model(**sample['net_input'])
+        """
+        # net_input: the input to the Model, containing keys
+        - `src_tokens` (LongTensor): 
+            a padded 2D Tensor of tokens in the source sentence of shape `(bsz, src_len)`. 
+            Padding will appear on the left if *left_pad_source* is ``True``.
+        - `src_lengths` (LongTensor): 
+            1D Tensor of the unpadded lengths of each source sentence of shape `(bsz)`
+        - `prev_output_tokens` (LongTensor): 
+            a padded 2D Tensor of tokens in the target sentence, shifted right by one position for teacher forcing, of shape `(bsz, tgt_len)`.
+            This key will not be present if *input_feeding* is ``False``. 
+            Padding will appear on the left if *left_pad_target* is ``True``.
+
+        # net_output: len() = 2
+        - net_output[0].size = torch.Size([23, 128, 44400])
+        - net_output[1]:
+            - attn
+            - inner_states
+            - copy_attn
+            - copy_alpha
+            - src_tokens
+        """
         loss, _ = self.compute_loss(model, net_output, sample, reduce=reduce)
         sample_size = sample['target'].size(0) if self.args.sentence_avg else sample['ntokens']
         copy_alpha = net_output[1]['copy_alpha'].mean().item() if net_output[1]['copy_alpha'] is not None else -1
@@ -41,13 +63,14 @@ class CrossEntropyCriterion(FairseqCriterion):
         return loss, sample_size, logging_output
 
     def compute_loss(self, model, net_output, sample, reduce=True):
-        
         if self.args.positive_label_weight != 1 \
             and sample is not None and sample.get('target_label', None) is not None:
             return self.compute_weighted_loss(model, net_output, sample, reduce=True)
         lprobs = model.get_normalized_probs(net_output, log_probs=True, sample=sample)
+        # get_normalized_probs: softmax (normalization)
         lprobs = lprobs.view(-1, lprobs.size(-1))
         target = model.get_targets(sample, net_output).view(-1)
+        # get_targets: return sample['target'] ... torch([23, 128])
         loss = F.nll_loss(lprobs, target, size_average=False, ignore_index=self.padding_idx,
                           reduce=reduce)
         return loss, loss

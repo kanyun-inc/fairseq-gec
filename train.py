@@ -1,4 +1,4 @@
-#!/usr/bin/env python3 -u
+""" #!/usr/bin/env python3 -u """
 # Copyright (c) 2017-present, Facebook, Inc.
 # All rights reserved.
 #
@@ -12,10 +12,14 @@ Train a new model on one or across multiple GPUs.
 import collections
 import itertools
 import os
+import sys
 import math
 import random
 import subprocess
 import time
+import numpy as np
+import pandas as pd
+from pprint import pprint
 
 import torch
 
@@ -25,6 +29,46 @@ from fairseq.trainer import Trainer
 from fairseq.meters import AverageMeter, StopwatchMeter
 from fairseq.utils import import_user_module
 from fairseq.models import ema_reverse, ema_restore
+
+from allennlp.models.semantic_role_labeler import convert_bio_tags_to_conll_format
+
+import logging
+logging.basicConfig(
+    format='%(asctime)s #%(lineno)s %(levelname)s %(name)s :::  %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S',
+    level=logging.DEBUG,
+    stream=sys.stdout,
+)
+logger = logging.getLogger(__name__)
+
+class GlobalParameters():
+    def __init__(self, epoch, lr):
+        # debugger
+        self.epoch = epoch
+        self.lr = lr
+        # counter
+        self.n_instances = 0      # instance 数
+        self.n_diff_gp_len = 0  # gold と pred の len(seq) が異なる
+        self.n_invld_bracket = 0  # blacket が unclosing
+    
+    def basic_params(self) -> dict:
+        return {
+                'epoch': self.epoch,
+                'lr': self.lr,
+                'n_instances': self.n_instances,
+                'n_diff_gp_len': self.n_diff_gp_len,
+                'n_invld_bracket': self.n_invld_bracket
+                }
+
+    def store_params(self, params:list, **kwargs) -> list:
+        basics = self.basic_params()
+        basics.update(kwargs)
+        params.append(basics)
+        return params
+
+epochs = []
+global_params = GlobalParameters(-1, -1)
+sys.setrecursionlimit(2000)
 
 
 def main(args, init_distributed=False):
@@ -39,18 +83,22 @@ def main(args, init_distributed=False):
     torch.manual_seed(args.seed)
 
     # Setup task, e.g., translation, language modeling, etc.
+    logger.info('Setup task')
     task = tasks.setup_task(args)
 
     # Load dataset splits
+    logger.info('Load dataset splits')
     load_dataset_splits(task, ['train', 'valid'])
 
     # Initialize distributed training (after data loading)
+    logger.info('Initialize distributed training')
     if init_distributed:
         import socket
         args.distributed_rank = distributed_utils.distributed_init(args)
         print('| initialized host {} as rank {}'.format(socket.gethostname(), args.distributed_rank))
 
     # Build model and criterion
+    logger.info('Build model and criterion')
     model = task.build_model(args)
     criterion = task.build_criterion(args)
     print(model)
@@ -73,6 +121,7 @@ def main(args, init_distributed=False):
     model.copy_pretrained_params(args)
 
     # Build trainer
+    logger.info('Build trainer')
     trainer = Trainer(args, task, model, criterion, dummy_batch, oom_batch)
     print('| training on {} GPUs'.format(args.distributed_world_size))
     print('| max tokens per GPU = {} and max sentences per GPU = {}'.format(
@@ -81,6 +130,7 @@ def main(args, init_distributed=False):
     ))
 
     # Initialize dataloader
+    logger.info('Initialize dataloader')
     epoch_itr = task.get_batch_iterator(
         dataset=task.dataset(args.train_subset),
         max_tokens=args.max_tokens,
@@ -96,9 +146,11 @@ def main(args, init_distributed=False):
 
     # Load the latest checkpoint if one is available
     if not load_checkpoint(args, trainer, epoch_itr):
+        logger.info('Load the latest checkpoint')
         trainer.dummy_train_step([dummy_batch])
 
     # Train until the learning rate gets too small
+    logger.debug('TRAIN')
     max_epoch = args.max_epoch or math.inf
     max_update = args.max_update or math.inf
     lr = trainer.get_lr()
@@ -106,28 +158,63 @@ def main(args, init_distributed=False):
     train_meter.start()
     valid_losses = [None]
     valid_subsets = args.valid_subset.split(',')
+    logger.debug("lr ... %lf" % lr)
+    logger.debug("min_lr ... %lf" % args.min_lr)
+    logger.debug("epoch_itr.epoch ... %d" % epoch_itr.epoch)
+    logger.debug("max_epoch ... %d" % max_epoch)
+    f_ep = os.path.abspath('epochs.txt')
+    f_ep = open(f_ep, 'a')
     while lr > args.min_lr and epoch_itr.epoch < max_epoch and trainer.get_num_updates() < max_update:
+        
         # train for one epoch
+        logger.info('===== train =====')
         train(args, trainer, task, epoch_itr)
 
         if epoch_itr.epoch % args.validate_interval == 0:
-            valid_losses = validate(args, trainer, task, epoch_itr, valid_subsets)
-            # ema process
+            logger.info('===== validate =====')
+            global global_params
+            global_params = GlobalParameters(epoch_itr.epoch, lr)
+            valid_losses, df_srl = validate(args, trainer, task, epoch_itr, valid_subsets, oracle='min')
+            global_params.store_params(
+                epochs, 
+                loss = valid_losses[0],
+                F1 = df_srl.get('F1'),
+                Prec = df_srl.get('prec.'),
+                Rec = df_srl.get('rec.'),
+                corr = df_srl.get('corr.'),
+                excess = df_srl.get('excess'),
+                missed = df_srl.get('missed'),
+                )
+            print(epochs[-1], file=f_ep)
+            logger.info("epoch_itr.epoch ... %d" % epoch_itr.epoch)
+            logger.debug("valid_losses ... {}".format(valid_losses[0]))
+
+            # ema process (直近の比重を大きく?)
+            logger.info('ema process')
             if not args.no_ema:
                 old_data = ema_restore(trainer.ema, trainer.model)
-                valid_losses_ema = validate(args, trainer, task, epoch_itr, valid_subsets)
+                logger.info('validate')
+                valid_losses_ema, _ = validate(args, trainer, task, epoch_itr, valid_subsets)
                 if epoch_itr.epoch % args.save_interval == 0:
+                    logger.info('save checkpoint ... {}'.format(epoch_itr))
                     save_checkpoint(args, trainer, epoch_itr, valid_losses_ema[0], suffix='ema')
                 ema_reverse(trainer.ema, trainer.model, old_data)
 
         # only use first validation loss to update the learning rate
+        logger.info('update lr')
         lr = trainer.lr_step(epoch_itr.epoch, valid_losses[0])
 
         # save checkpoint
         if epoch_itr.epoch % args.save_interval == 0:
+            logger.debug('save checkpoint ... {}'.format(epoch_itr))
             save_checkpoint(args, trainer, epoch_itr, valid_losses[0])
+    
     train_meter.stop()
-    print('| done training in {:.1f} seconds'.format(train_meter.sum))
+    print('| DONE training in {:.1f} seconds'.format(train_meter.sum))
+    logger.info('destdir is ... {}'.format(args.save_dir))
+    #pprint(epochs)
+    f_ep.close()
+    sys.exit()
 
 
 def train(args, trainer, task, epoch_itr):
@@ -137,6 +224,7 @@ def train(args, trainer, task, epoch_itr):
             if epoch_itr.epoch <= len(args.update_freq) else args.update_freq[-1]
 
     # Initialize data iterator
+    logger.info('Initialize data iterator')
     itr = epoch_itr.next_epoch_itr(
         fix_batches_to_gpus=args.fix_batches_to_gpus,
         shuffle=(epoch_itr.epoch >= args.curriculum),
@@ -147,9 +235,22 @@ def train(args, trainer, task, epoch_itr):
     )
 
     extra_meters = collections.defaultdict(lambda: AverageMeter())
-    first_valid = args.valid_subset.split(',')[0]
-    max_update = args.max_update or math.inf
+    first_valid = args.valid_subset.split(',')[0]   # 'valid'
+    max_update = args.max_update or math.inf        # inf
     for i, samples in enumerate(progress, start=epoch_itr.iterations_in_epoch):
+        """ samples: List[Dict] (sizeof 1)
+        - id: tensor([48])
+        - nsentences: 1
+        - ntokens: 43
+        - net_input: {}
+            - src_tokens: tensor([1, 39])
+            - src_lengths: tensor([39])
+            - prev_output_tokens: tensor([1, 43])
+        - target: tensor([1, 43])
+        - source_label: None
+        - target_label: None
+        """
+
         log_output = trainer.train_step(samples)
         if log_output is None:
             continue
@@ -172,7 +273,7 @@ def train(args, trainer, task, epoch_itr):
 
         num_updates = trainer.get_num_updates()
         if args.save_interval_updates > 0 and num_updates % args.save_interval_updates == 0 and num_updates > 0:
-            valid_losses = validate(args, trainer, task, epoch_itr, [first_valid])
+            valid_losses, _ = validate(args, trainer, task, epoch_itr, [first_valid])
             save_checkpoint(args, trainer, epoch_itr, valid_losses[0])
 
         if num_updates >= max_update:
@@ -185,6 +286,7 @@ def train(args, trainer, task, epoch_itr):
     progress.print(stats, tag='train', step=stats['num_updates'])
 
     # reset training meters
+    logger.info('reset trainint meters')
     for k in [
         'train_loss', 'train_nll_loss', 'wps', 'ups', 'wpb', 'bsz', 'gnorm', 'clip',
     ]:
@@ -219,10 +321,10 @@ def get_training_stats(trainer):
     return stats
 
 
-def validate(args, trainer, task, epoch_itr, subsets):
+def validate(args, trainer, task, epoch_itr, subsets, oracle='min'):
     """Evaluate the model on the validation set(s) and return the losses."""
     valid_losses = []
-    for subset in subsets:
+    for subset in subsets: # subset == 'valid'
         # Initialize data iterator
         itr = task.get_batch_iterator(
             dataset=task.dataset(subset),
@@ -252,13 +354,68 @@ def validate(args, trainer, task, epoch_itr, subsets):
                 meter.reset()
         extra_meters = collections.defaultdict(lambda: AverageMeter())
 
+        #TODO ここで計算する
+        fo_gold, fo_pred = open(f'work/gold_{epoch_itr.epoch}.prop', 'w'), open(f'work/pred_{epoch_itr.epoch}.prop', 'w')
+        logger.info('open gold prop ... {}'.format(fo_gold))
+        logger.info('open pred prop ... {}'.format(fo_pred))
+        
         for sample in progress:
-            log_output = trainer.valid_step(sample)
+            """
+            sample.keys()
+            * id            ::: tensor([126, 127, 121, 62, 103, 66, 63, 57])
+            * nsentences    ::: 8
+            * ntokens       ::: 63
+            * net_input     ::: dict_keys(['src_tokens, src_length, prev_output_tokens'])
+            * target        ::: torch.Size([8, 18])
+            * source_label  ::: None
+            * target_label  ::: None
+            """
+            ### develop ###
+            nsents = sample['nsentences']
+            gold, pred = trainer.eval_step(sample)
+            gold = gold.cpu()
+            pred = torch.argmax(pred, -1).cpu()
+            gold_tokens = np.array(list(dict_itos(task.tgt_dict, gold))).reshape(nsents, -1).tolist()
+            pred_tokens = np.array(list(dict_itos(task.tgt_dict, pred))).reshape(nsents, -1).tolist()
+            assert len(gold_tokens) == nsents
+            assert len(pred_tokens) == nsents
+            wrap_write_prop(args, fo_gold, gold_tokens, gold_tokens, oracle=oracle)
+            wrap_write_prop(args, fo_pred, pred_tokens, gold_tokens, oracle=oracle)
+
+
+            ### original ###
+            log_output = trainer.valid_step(sample) # trainer.valid_step 内で srl score を計算？
 
             for k, v in log_output.items():
                 if k in ['loss', 'nll_loss', 'ntokens', 'nsentences', 'sample_size']:
                     continue
                 extra_meters[k].update(v)
+        
+        fo_gold.close(), fo_pred.close()
+
+
+        ### srl-eval.pl ###
+        path_pl = os.path.abspath('/home/miyawaki_shumpei/soft/srlconll-1.1/bin/srl-eval.pl')
+        path_gldp = os.path.abspath(fo_gold.name)
+        path_prdp = os.path.abspath(fo_pred.name)
+        command = f"perl {path_pl} {path_gldp} {path_prdp}"
+        process = subprocess.run(command.split(), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        result = process.stdout.decode("utf8")
+        try:
+            result = [o.split() for o in result.split('\n') if len(o.split()) > 1]
+            statistics, scores = result[:3], result[3:]
+            column, *scores = scores
+            column.insert(0, 'label')
+            overall = ( 
+                pd.DataFrame(scores, columns=column)
+                .set_index('label')
+                .loc['Overall']
+            )
+            
+            logger.debug('overall scores ::: {}'.format(overall))
+        except:
+            overall = None
+            import ipdb; ipdb.set_trace()
 
         # log validation stats
         stats = get_valid_stats(trainer)
@@ -267,7 +424,174 @@ def validate(args, trainer, task, epoch_itr, subsets):
         progress.print(stats, tag=subset, step=trainer.get_num_updates())
 
         valid_losses.append(stats['loss'].avg)
-    return valid_losses
+    return valid_losses, overall
+
+
+# decorator
+def develop(tag):
+    def _develop(func):
+        def wrapper(*args, **kwargs):
+            logger.info('{} ... {}'.format(tag, func))
+            func(*args, **kwargs)
+        return wrapper
+    return _develop
+
+
+def dict_itos(dict, indices):
+    return map(lambda x: dict[int(x)], indices)
+
+def is_start(t, excepts=('<unk>', '<pad>', '<EN-SRL>', '<DE-SRL>', '</s>')):
+    return t.startswith('<') and t.endswith('>') and not t.startswith('</') and (t not in excepts)
+
+def is_end(t, excepts=('<unk>', '<pad>', '<EN-SRL>', '<DE-SRL>', '</s>')):
+    return t.startswith('</') and t.endswith('>') and (t not in excepts)
+
+def extract_index(tokens: list, query='<V>', pos=1):
+    index = pos+tokens.index(query) if query in tokens else -1
+    return index if (index+1 <= len(tokens)) and (index != -1) else -1
+
+def eliminate_labels(tokens, label=None):
+    return [t for t in tokens if (not is_start(t) and not is_end(t))] if label is None \
+    else [t for t in tokens if t != label]
+
+
+def is_closed(tokens: list):
+    isInvalid, label = 0, ''
+    for token in tokens:
+        if isInvalid < 0 or 1 < isInvalid: return False
+        if is_start(token):
+            label = token[1:-1]
+            isInvalid += 1
+        elif is_end(token): 
+            isInvalid -= 1
+            if label != token[2:-1]: return False
+    return True if isInvalid == 0 else False
+
+def get_invld_bracket(tokens: list):
+    isInvalid, label = 0, (-1, '')
+    invld_label = []
+    for idx, token in enumerate(tokens):
+        if isInvalid < 0: 
+            invld_label.append(idx) # </A0> が出現 → append </A0> idx
+            isInvalid += 1
+        if 1 < isInvalid:
+            invld_label.append(label[0]) # <A1> <A0> が出現した → append <A1> idx
+            isInvalid -= 1
+        if is_start(token):
+            label = (idx, token[1:-1])
+            isInvalid += 1
+        elif is_end(token): 
+            isInvalid -= 1
+            if label[1] != token[2:-1]: 
+                invld_label.extend([label[0], idx]) # <A1> </A0> が出現した → append <A1>, </A0> idx
+    if isInvalid != 0: invld_label.append(label[0])
+    return invld_label
+
+#@develop('dev.1 convert into bio')
+def to_bio(tokens: list, init_label='O', excepts=('<pad>', '<EN-SRL>', '<DE-SRL>', '</s>')) -> list:
+    # is_close(tokens)
+    is_B, bios, label = False, [], init_label
+    for token in tokens:
+        if is_start(token):
+            is_B, label = True, token[1:-1]
+        elif is_end(token): 
+            is_B, label = False, init_label
+            continue
+        elif label == init_label: # O
+            bios.append(label)
+        elif token in excepts:
+            continue
+        else: # token==label -> BIを付与
+            if is_B:
+                bios.append(f"B-{label}")
+                is_B = False
+            else:
+                bios.append(f"I-{label}")
+    return bios
+
+#@develop('dev.2 convert into prop')
+def to_prop(bios:list):
+    #assert bios is not None
+    return convert_bio_tags_to_conll_format(bios)
+
+# dev なので，同一文でも新しく 2cols を作成
+#@develop('dev.3 write prop')
+def write_prop(fo, tokens:list, golds:list, oracle='min'):
+    tokens = eliminate_labels(tokens, label='</s>')
+    golds = eliminate_labels(golds, label='</s>')
+    isPred = 'pred' in fo.name
+    assert oracle in ('min', 'max'), "OracleError"
+    gold_props = to_prop(to_bio(golds))
+    verb_idx = extract_index(golds, query='<V>', pos=1)
+    col_0 = ['-' for _ in gold_props]
+    col_1 = []
+    if isPred: global_params.n_instances += 1
+    if verb_idx == -1:
+        # 述語なし
+        col_1 = []
+    else:
+        def extract_index_for_cols(golds, target='<V>'):
+            count = 0
+            for token in golds:
+                if (not is_start(token)) and (not is_end(token)): count+=1
+                if token == target: return count
+        verb = golds[verb_idx]
+        col_vix = extract_index_for_cols(golds)
+        try:
+            col_0[col_vix] = verb
+        except IndexError:
+            import ipdb; ipdb.set_trace()
+        pure_tokens = eliminate_labels(tokens)
+        pure_golds = eliminate_labels(golds)
+        if len(pure_tokens) != len(pure_golds):
+            # [process] 連続で単語出現 ... hoge hoge → hoge
+            tokens_, prev = [], ''
+            for idx, t in enumerate(tokens):
+                if prev == t: continue
+                tokens_.append(t)
+                prev = t
+            if len(eliminate_labels(tokens_)) == len(pure_golds):
+                col_1 = to_prop(to_bio(tokens_))
+            else:
+                # print("len 不一致")
+                # import ipdb; ipdb.set_trace()
+                col_1 = ['*' if oracle=='min' else gold for gold in gold_props]
+                if isPred: global_params.n_diff_gp_len += 1
+        elif not is_closed(tokens):
+            # [process] 片方の label token が出現 ... <A0> hoge </A1> → drop
+            invld_label = get_invld_bracket(tokens) # indices
+            tokens = [t for i, t in enumerate(tokens) if i not in invld_label]
+            if is_closed(tokens) and (len(pure_golds)==len(eliminate_labels(tokens))):
+                col_1 = to_prop(to_bio(tokens))
+            # else
+            else:
+                # import ipdb; ipdb.set_trace()
+                col_1 = ['*' if oracle=='min' else gold for gold in gold_props]
+                if isPred: global_params.n_invld_bracket += 1
+        else:
+            # 問題なし
+            col_1 = to_prop(to_bio(tokens))
+            if len(col_0) != len(col_1):
+                print("len 不一致 v2")
+                import ipdb; ipdb.set_trace()
+                col_1 = ['*' if oracle=='min' else gold for gold in gold_props]
+    
+    try:
+        assert (len(col_0)==len(col_1)) or (set(col_0) == {'-'})
+    except:
+        import ipdb; ipdb.set_trace()
+    for c0, c1 in itertools.zip_longest(col_0, col_1):
+        if c1 is not None: print(f"{c0}\t{c1}", file=fo, end='\n')
+        else: print(f"{c0}", file=fo, end='\n')
+
+
+def wrap_write_prop(args, fo, sents:list, golds:list, oracle='min'):
+    if args.no_ema: return
+    # write_prop 関数は一文専用なので，複数文で loop
+    for sent, gold in zip(sents, golds):
+        sent = [token for token in sent if token!='<pad>']
+        gold = [token for token in gold if token!='<pad>']
+        write_prop(fo, sent, gold, oracle=oracle)
 
 
 def get_valid_stats(trainer):

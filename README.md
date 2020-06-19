@@ -1,4 +1,26 @@
-# Introduction
+# Experimental Settings (my extension)
+
+## Experimental Settings
+* Various experimental values for SRL are written in `srl/experiment.config`
+
+
+## fairseq-Preprocess
+* using WSJ as test set (need to rewrite the following file to use Brown)
+``` running fairseq-preprocess
+$ bash preprocess/create_preprocess_data.sh
+```
+
+## fairseq-Train
+* if change the save dir, rewrite `OUT=*` in `config.sh`
+``` running fairseq-train
+$ bash run.sh -g [GPU_ID] -m [MODE=train]
+```
+
+
+
+
+
+# Introduction (source)
 
 Source code for the paper: 
 **Improving Grammatical Error Correction via Pre-Training a Copy-Augmented Architecture with Unlabeled Data**
@@ -31,7 +53,7 @@ sh download.sh
 ## Train with the pre-trained model
 ```
 cd fairseq-gec
-pip install --editable
+pip install --editable .
 sh train.sh \${device_id} \${experiment_name}
 ```
 

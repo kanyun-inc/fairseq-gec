@@ -9,11 +9,23 @@
 Translate pre-processed data with a trained model.
 """
 
+import os
+import sys
+
 import torch
 
 from fairseq import bleu, options, progress_bar, tasks, tokenizer, utils
 from fairseq.meters import StopwatchMeter, TimeMeter
 from fairseq.utils import import_user_module
+
+import logging
+logging.basicConfig(
+    format='%(asctime)s #%(lineno)s %(levelname)s %(name)s :::  %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S',
+    level=logging.DEBUG,
+    stream=sys.stdout,
+)
+logger = logging.getLogger(__name__)
 
 
 def main(args):
@@ -29,16 +41,22 @@ def main(args):
 
     if args.max_tokens is None and args.max_sentences is None:
         args.max_tokens = 12000
+    logger.debug('max_tokens ... %d' % args.max_tokens)
     print(args)
 
     use_cuda = torch.cuda.is_available() and not args.cpu
 
     # Load dataset splits
+    logger.info('Load dataset split')
     task = tasks.setup_task(args)
     task.load_dataset(args.gen_subset)
+    logger.debug('args.data ... {}'.format(args.data))
+    logger.debug('args.gen_subset ... {}'.format(args.gen_subset))
+    logger.debug('len(task.dataset(args.gen_subset))'.format(len(task.dataset(args.gen_subset))))
     print('| {} {} {} examples'.format(args.data, args.gen_subset, len(task.dataset(args.gen_subset))))
 
     # Set dictionaries
+    logger.info('Set dictionaries')
     try:
         src_dict = getattr(task, 'source_dictionary', None)
     except NotImplementedError:
@@ -46,6 +64,7 @@ def main(args):
     tgt_dict = task.target_dictionary
 
     # Load ensemble
+    logger.info('Load ensemble')
     print('| loading model(s) from {}'.format(args.path))
     models, _model_args = utils.load_ensemble_for_inference(
         args.path.split(':'), task, model_arg_overrides=eval(args.model_overrides),
@@ -53,6 +72,7 @@ def main(args):
     args.copy_ext_dict = getattr(_model_args, 'copy_attention', False)
 
     # Optimize ensemble for generation
+    logger.info('Optimize ensemble for generation')
     for model in models:
         model.make_generation_fast_(
             beamable_mm_beam_size=None if args.no_beamable_mm else args.beam,
@@ -65,11 +85,13 @@ def main(args):
 
     # Load alignment dictionary for unknown word replacement
     # (None if no unknown word replacement, empty if no path to align dictionary)
+    logger.info('Load alignment dictionary')
     align_dict = utils.load_align_dict(args.replace_unk)
     if align_dict is None and args.copy_ext_dict:
         align_dict = {} # build empty dict for copy.
 
     # Load dataset (possibly sharded)
+    logger.info('Load dataset')
     itr = task.get_batch_iterator(
         dataset=task.dataset(args.gen_subset),
         max_tokens=args.max_tokens,
@@ -86,10 +108,12 @@ def main(args):
     ).next_epoch_itr(shuffle=False)
 
     # Initialize generator
+    logger.info('Initialize generator')
     gen_timer = StopwatchMeter()
     generator = task.build_generator(args)
 
     # Generate and compute BLEU score
+    logger.info('Generate and compute BLEU score')
     if args.sacrebleu:
         scorer = bleu.SacrebleuScorer()
     else:

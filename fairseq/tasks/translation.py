@@ -167,6 +167,9 @@ class TranslationTask(FairseqTask):
 
                 # infer langcode
                 src, tgt = self.args.source_lang, self.args.target_lang
+                # print(split_k, src, lang=tgt, data_path)
+                # > train, src, tgt, srl/data-bin
+                # "{data_path}/{split_k}.{src}-{tgt}.{lang}" file
                 if split_exists(split_k, src, tgt, src, data_path):
                     prefix = os.path.join(data_path, '{}.{}-{}.'.format(split_k, src, tgt))
                 elif split_exists(split_k, tgt, src, src, data_path):

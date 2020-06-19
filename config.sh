@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/usr/bin/bash
 
 device=0
 if [ $# -ge 1 ]; then
@@ -10,8 +10,12 @@ if [ $# -ge 2 ]; then
     exp=$2
 fi
 
-DATA='data' # input dir
-OUT='out' # output dir
+exp='_small'
+OUT='small' # output dir
+DATA='datasets/preprocessed/conll05' # input dir
+
+#exp=''
+#OUT=srl
 
 DATA_BIN=$OUT/data_bin
 DATA_RAW=$OUT/data_raw
